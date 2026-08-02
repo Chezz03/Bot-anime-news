@@ -36,18 +36,29 @@ SCOPES = ['https://www.googleapis.com/auth/blogger']
 # ============================================
 
 def autenticar_blogger():
+    """Autentica con OAuth 2.0 y devuelve el servicio de Blogger"""
     creds = None
+    
+    # Verificar si ya existe un token guardado
     if os.path.exists('token.json'):
         creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+    
+    # Si no hay credenciales o son inválidas, pedir autorización
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
+            # Usar el archivo credentials.json que descargaste
             flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
             creds = flow.run_local_server(port=0)
+        
+        # Guardar el token para la próxima vez
         with open('token.json', 'w') as token:
             token.write(creds.to_json())
-    return build('blogger', 'v3', credentials=creds)
+    
+    # Construir el servicio de Blogger
+    service = build('blogger', 'v3', credentials=creds)
+    return service
 
 # ============================================
 # TRADUCCIÓN Y SEO
@@ -138,7 +149,7 @@ def formatear_contenido(texto, imagen, enlace, fuente):
     """
 
 # ============================================
-# FUNCIÓN PRINCIPAL (ACTUALIZADA)
+# FUNCIÓN PRINCIPAL
 # ============================================
 
 def main():
@@ -148,8 +159,7 @@ def main():
     
     # Verificar que el Blog ID esté configurado
     if not BLOGGER_BLOG_ID:
-        print("❌ Error: BLOGGER_BLOG_ID no está configurado como variable de entorno")
-        print("   Configurá el secreto BLOGGER_BLOG_ID en GitHub Actions")
+        print("❌ Error: BLOGGER_BLOG_ID no está configurado")
         return
     
     print(f"✅ Blog ID: {BLOGGER_BLOG_ID}")
@@ -157,7 +167,9 @@ def main():
     # Verificar que exista el archivo credentials.json
     if not os.path.exists('credentials.json'):
         print("❌ Error: No se encontró el archivo credentials.json")
-        print("   Verificá que el secreto CREDENTIALS_JSON esté configurado correctamente")
+        print("📂 Contenido del directorio:")
+        for file in os.listdir('.'):
+            print(f"   - {file}")
         return
     
     try:
@@ -177,20 +189,21 @@ def main():
             feed = feedparser.parse(config_fuente["url"])
             print(f"   📡 {len(feed.entries)} noticias encontradas")
             for entry in feed.entries[:5]:
-                titulo_trad = seo.optimizar_titulo(entry.title)
-                descripcion = entry.description if 'description' in entry else ""
-                descripcion_trad = traductor.traducir(descripcion[:500])
-                imagen = extraer_imagen(entry)
-                contenido = formatear_contenido(descripcion_trad, imagen, entry.link, config_fuente)
-                
-                post = {
-                    'title': titulo_trad,
-                    'content': contenido,
-                    'labels': config_fuente['etiquetas'],
-                    'status': 'DRAFT'
-                }
                 try:
-                    service.posts().insert(blogId=BLOGGER_BLOG_ID, body=post).execute()
+                    titulo_trad = seo.optimizar_titulo(entry.title)
+                    descripcion = entry.description if 'description' in entry else ""
+                    descripcion_trad = traductor.traducir(descripcion[:500])
+                    imagen = extraer_imagen(entry)
+                    contenido = formatear_contenido(descripcion_trad, imagen, entry.link, config_fuente)
+                    
+                    post = {
+                        'title': titulo_trad,
+                        'content': contenido,
+                        'labels': config_fuente['etiquetas'],
+                        'status': 'DRAFT'
+                    }
+                    
+                    result = service.posts().insert(blogId=BLOGGER_BLOG_ID, body=post).execute()
                     print(f"   ✅ Borrador creado: {titulo_trad[:50]}...")
                     total_publicadas += 1
                 except Exception as e:
