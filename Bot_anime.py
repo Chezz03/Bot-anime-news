@@ -138,7 +138,7 @@ def formatear_contenido(texto, imagen, enlace, fuente):
     """
 
 # ============================================
-# FUNCIÓN PRINCIPAL
+# FUNCIÓN PRINCIPAL (ACTUALIZADA)
 # ============================================
 
 def main():
@@ -146,11 +146,27 @@ def main():
     print("🤖 BOT DE AUTOMATIZACIÓN - ANIME ACTUALIDAD ARGENTINA")
     print("="*60)
     
+    # Verificar que el Blog ID esté configurado
     if not BLOGGER_BLOG_ID:
-        print("❌ Error: BLOGGER_BLOG_ID no está configurado")
+        print("❌ Error: BLOGGER_BLOG_ID no está configurado como variable de entorno")
+        print("   Configurá el secreto BLOGGER_BLOG_ID en GitHub Actions")
         return
     
-    service = autenticar_blogger()
+    print(f"✅ Blog ID: {BLOGGER_BLOG_ID}")
+    
+    # Verificar que exista el archivo credentials.json
+    if not os.path.exists('credentials.json'):
+        print("❌ Error: No se encontró el archivo credentials.json")
+        print("   Verificá que el secreto CREDENTIALS_JSON esté configurado correctamente")
+        return
+    
+    try:
+        service = autenticar_blogger()
+        print("✅ Autenticación exitosa")
+    except Exception as e:
+        print(f"❌ Error de autenticación: {e}")
+        return
+    
     traductor = Traductor()
     seo = OptimizadorSEO()
     total_publicadas = 0
@@ -159,6 +175,7 @@ def main():
         print(f"\n📰 Procesando: {nombre_fuente}")
         try:
             feed = feedparser.parse(config_fuente["url"])
+            print(f"   📡 {len(feed.entries)} noticias encontradas")
             for entry in feed.entries[:5]:
                 titulo_trad = seo.optimizar_titulo(entry.title)
                 descripcion = entry.description if 'description' in entry else ""
@@ -174,10 +191,10 @@ def main():
                 }
                 try:
                     service.posts().insert(blogId=BLOGGER_BLOG_ID, body=post).execute()
-                    print(f"✅ Borrador creado: {titulo_trad[:50]}...")
+                    print(f"   ✅ Borrador creado: {titulo_trad[:50]}...")
                     total_publicadas += 1
                 except Exception as e:
-                    print(f"❌ Error: {e}")
+                    print(f"   ❌ Error al crear borrador: {e}")
                 time.sleep(2)
         except Exception as e:
             print(f"❌ Error procesando {nombre_fuente}: {e}")
