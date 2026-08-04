@@ -23,7 +23,10 @@ jobs:
       
       - name: Crear credentials.json
         run: echo '${{ secrets.CREDENTIALS_JSON }}' > credentials.json
+      - name: Crear token.json
       
+        run: echo '${{ secrets.TOKEN_JSON }}' > token.json
+        
       - name: Ejecutar bot
         env:
           BLOGGER_BLOG_ID: ${{ secrets.BLOGGER_BLOG_ID }}
