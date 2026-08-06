@@ -14,16 +14,16 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 # CONFIGURACIÓN
 # ============================================
 BLOGGER_BLOG_ID = os.environ.get("BLOGGER_BLOG_ID", "")
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")  # Opcional: si no está, usa traducción simple
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")  # ¡USAMOS GROQ EN VEZ DE ANTHROPIC!
 
 RSS_FEEDS = {
     "animenewsnetwork": {
-        "url": "https://www.animenewsnetwork.com/all/rss.xml",
+        "url": "https://www.animenewsnetwork.com/newsfeed/rss.xml",  # RSS más confiable
         "categoria": "Noticias",
         "etiquetas": ["Anime", "Internacional", "Reseñas"]
     },
     "crunchyroll": {
-        "url": "https://www.crunchyroll.com/es/news/feed/rss",
+        "url": "https://www.crunchyroll.com/news/rss",
         "categoria": "Noticias",
         "etiquetas": ["Anime", "Estrenos", "Crunchyroll"]
     }
@@ -53,9 +53,8 @@ def autenticar_blogger():
     service = build('blogger', 'v3', credentials=creds)
     return service
 
-
 # ============================================
-# TRADUCCIÓN (RESPALDO SI NO HAY IA CONFIGURADA)
+# TRADUCCIÓN (RESPALDO)
 # ============================================
 class Traductor:
     def __init__(self):
@@ -81,57 +80,80 @@ class Traductor:
             print(f"Error en traducción: {e}")
         return texto
 
-
 # ============================================
-# REESCRITURA CON IA (OPCIONAL)
+# REESCRITURA CON GROQ (IA GRATUITA)
 # ============================================
-def reescribir_con_ia(titulo, descripcion, fuente_nombre):
+def reescribir_con_groq(titulo, descripcion, fuente_nombre):
     """
-    Genera un resumen/artículo ORIGINAL en español a partir de los datos
-    de la noticia original, en vez de traducirla literalmente.
-    Devuelve None si falla o si no hay API key configurada.
+    Usa Groq (Llama 4) para reescribir la noticia con estilo humano y SEO.
+    Si falla o no hay API key, devuelve None para usar el respaldo.
     """
-    if not ANTHROPIC_API_KEY:
+    if not GROQ_API_KEY:
+        print("   ⚠️ GROQ_API_KEY no configurada. Usando traducción simple.")
         return None
 
-    prompt = f"""Sos redactor de un blog de noticias de anime en español (Argentina).
-Te paso el título y una descripción breve de una noticia publicada en {fuente_nombre}.
+    # SYSTEM PROMPT para darle el estilo que queremos
+    system_prompt = """Eres un redactor experto en anime para "Anime Actualidad Argentina", un blog argentino.
+Tu tarea es REESCRIBIR noticias de anime con estilo humano, atractivo y optimizado para SEO.
 
+REGLAS OBLIGATORIAS:
+1. NO copies texto literal. Reinterpretá la noticia con tus propias palabras.
+2. Escribí como si le hablaras a un amigo otaku: entusiasta, informado y cercano.
+3. Incluye estas palabras clave naturalmente: "anime", "estreno", "temporada", "Argentina", y el nombre del anime.
+4. Estructura: 2-3 párrafos con datos clave → CIERRE con llamado a la acción.
+5. Si la noticia es sobre un estreno, mencioná fecha y plataforma (Netflix, Crunchyroll, etc.).
+6. Al final agregá: "¿Qué opinás? Dejanos tu comentario en Anime Actualidad Argentina"
+
+Ejemplo de tono:
+"¡Atención, otakus argentinos! La esperada segunda temporada de 'Jujutsu Kaisen' ya tiene fecha de estreno en Crunchyroll. Prepárense para el 31 de diciembre, porque el caos está por llegar. ¿Ya viste el tráiler? Contanos qué te pareció en los comentarios."
+
+Devolvé SOLO el texto de la nota, sin título, sin encabezados, sin agregar nada más."""
+
+    user_prompt = f"""Fuente: {fuente_nombre}
 Título original: {titulo}
 Descripción original: {descripcion}
 
-Escribí una nota breve (2 párrafos cortos, máximo 120 palabras en total) EN TUS PROPIAS PALABRAS,
-contando la misma información pero con redacción propia, tono informativo y cercano para fans de anime.
-No inventes datos que no estén en el texto original. No uses comillas textuales.
-Devolvé SOLO el texto de la nota, sin título, sin encabezados, sin agregar nada más."""
+Reescribí esta noticia como si fuera un post ORIGINAL de Anime Actualidad Argentina.
+Recordá: estilo humano, con SEO, keywords y tono argentino/otaku."""
 
     try:
         response = requests.post(
-            "https://api.anthropic.com/v1/messages",
+            "https://api.groq.com/openai/v1/chat/completions",
             headers={
-                "x-api-key": ANTHROPIC_API_KEY,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json"
+                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Content-Type": "application/json"
             },
             json={
-                "model": "claude-haiku-4-5-20251001",
-                "max_tokens": 400,
-                "messages": [{"role": "user", "content": prompt}]
+                "model": "llama-3.3-70b-versatile",  # Modelo gratuito y potente
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                "temperature": 0.7,
+                "max_tokens": 600
             },
             timeout=30
         )
+        
         if response.status_code == 200:
             data = response.json()
-            texto = "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text")
-            return texto.strip() if texto.strip() else None
+            texto = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+            if texto.strip():
+                print("   ✅ Reescritura con Groq exitosa")
+                return texto.strip()
+            else:
+                print("   ⚠️ Groq devolvió contenido vacío")
+                return None
         else:
-            print(f"⚠️ IA respondió con status {response.status_code}, uso traducción de respaldo")
+            print(f"   ⚠️ Groq respondió con status {response.status_code}")
             return None
     except Exception as e:
-        print(f"⚠️ Error llamando a la IA: {e}. Uso traducción de respaldo")
+        print(f"   ⚠️ Error llamando a Groq: {e}")
         return None
 
-
+# ============================================
+# OPTIMIZADOR SEO PARA TÍTULOS
+# ============================================
 class OptimizadorSEO:
     def __init__(self):
         self.palabras_clave = ["anime", "manga", "estreno", "noticias", "japón", "cultura otaku"]
@@ -141,9 +163,8 @@ class OptimizadorSEO:
             titulo_trad = titulo_trad[:62] + "..."
         return titulo_trad
 
-
 # ============================================
-# EXTRACCIÓN DE IMÁGENES (MEJORADA)
+# EXTRACCIÓN DE IMÁGENES
 # ============================================
 IMAGEN_DEFECTO = "https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEjHDh8uCDe6OcMJuYQ48ZoDxLDetLv4bCgAesT2hZZrbTlsSVM-vSy-OlGjDnV5W9AE1Y8dapE-ANqUfwyDO2qzqpZRdFQxcAGsOwnYUslcyDuVKI4_zvyi01pgwaQHVqauXTnccYtxd0XLCbq8asfwWCQeXWfrzCJ0xhPiNfSR7zqFbWzy28kxGA"
 
@@ -164,19 +185,14 @@ def extraer_imagen_de_rss(entry):
         img_match = re.search(r'<img[^>]+src="([^">]+)"', content)
         if img_match:
             return img_match.group(1)
-    # A veces la imagen viene en el summary/description como HTML
     if 'summary' in entry:
         img_match = re.search(r'<img[^>]+src="([^">]+)"', entry.summary)
         if img_match:
             return img_match.group(1)
     return None
 
-
 def extraer_imagen_de_articulo(url_articulo):
-    """
-    Respaldo: si el RSS no trae imagen, entra a la página del artículo
-    y busca la imagen principal (meta og:image), que casi todos los sitios tienen.
-    """
+    """Respaldo: si el RSS no trae imagen, entra a la página del artículo"""
     try:
         response = requests.get(
             url_articulo, timeout=10,
@@ -193,7 +209,6 @@ def extraer_imagen_de_articulo(url_articulo):
         print(f"    ⚠️ No se pudo obtener imagen del artículo: {e}")
     return None
 
-
 def extraer_imagen(entry):
     imagen = extraer_imagen_de_rss(entry)
     if imagen:
@@ -205,7 +220,6 @@ def extraer_imagen(entry):
             return imagen
 
     return IMAGEN_DEFECTO
-
 
 # ============================================
 # FORMATO DEL POST
@@ -235,7 +249,6 @@ Publicado automáticamente por Bot de Anime Actualidad Argentina
 </p>
 """
 
-
 # ============================================
 # FUNCIÓN PRINCIPAL
 # ============================================
@@ -249,7 +262,7 @@ def main():
         return
 
     print(f"✅ Blog ID: {BLOGGER_BLOG_ID}")
-    print(f"🧠 Reescritura con IA: {'ACTIVADA' if ANTHROPIC_API_KEY else 'desactivada (usando traducción simple)'}")
+    print(f"🧠 Reescritura con Groq: {'ACTIVADA' if GROQ_API_KEY else 'desactivada (usando traducción simple)'}")
 
     if not os.path.exists('credentials.json'):
         print("❌ Error: No se encontró el archivo credentials.json")
@@ -275,25 +288,35 @@ def main():
             for entry in feed.entries[:5]:
                 try:
                     descripcion = entry.description if 'description' in entry else ""
+                    if not descripcion and 'summary' in entry:
+                        descripcion = entry.summary
 
-                    # Intentar reescritura con IA; si no hay key o falla, usar traducción
-                    texto_final = reescribir_con_ia(entry.title, descripcion[:1500], nombre_fuente)
+                    # ---- INTENTAR REESCRITURA CON GROQ ----
+                    texto_final = reescribir_con_groq(entry.title, descripcion[:1500], nombre_fuente)
+                    
                     if texto_final:
-                        titulo_trad = traductor.traducir(entry.title)  # el título sí conviene traducirlo simple
-                        titulo_trad = seo.optimizar_titulo(titulo_trad)
-                    else:
+                        # Si Groq funcionó, solo traducimos el título
                         titulo_trad = traductor.traducir(entry.title)
                         titulo_trad = seo.optimizar_titulo(titulo_trad)
-                        texto_final = traductor.traducir(descripcion[:500])
+                    else:
+                        # Respaldo: traducción simple
+                        print("   🔄 Usando traducción de respaldo")
+                        titulo_trad = traductor.traducir(entry.title)
+                        titulo_trad = seo.optimizar_titulo(titulo_trad)
+                        texto_final = traductor.traducir(descripcion[:500]) if descripcion else "Noticia sin descripción."
 
+                    # ---- EXTRAER IMAGEN ----
                     imagen = extraer_imagen(entry)
+                    
+                    # ---- FORMATO ----
                     contenido = formatear_contenido(texto_final, imagen, entry.link, config_fuente)
 
+                    # ---- PUBLICAR COMO BORRADOR ----
                     post = {
                         'title': titulo_trad,
                         'content': contenido,
                         'labels': config_fuente['etiquetas'],
-                        'status': 'DRAFT'
+                        'status': 'DRAFT'  # <-- Publicar como borrador para revisar
                     }
 
                     result = service.posts().insert(blogId=BLOGGER_BLOG_ID, body=post).execute()
@@ -311,7 +334,6 @@ def main():
     print("\n" + "="*60)
     print(f"✅ Proceso completado. {total_publicadas} borradores creados.")
     print("="*60)
-
 
 if __name__ == "__main__":
     main()
