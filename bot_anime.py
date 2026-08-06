@@ -3,7 +3,7 @@ import requests
 import re
 import json
 import os
-import markdown  # Necesitas instalar: pip install markdown
+import markdown
 from datetime import datetime
 import time
 from google.oauth2.credentials import Credentials
@@ -184,6 +184,35 @@ def detectar_anime_en_titulo(titulo):
     return None
 
 # ============================================
+# SYSTEM PROMPT - ESTILO ANIME ARGENTINA (CORREGIDO)
+# ============================================
+SYSTEM_PROMPT = """
+Eres un redactor experto para "Anime Actualidad Argentina", un blog argentino.
+Tu estilo de redacción se basa en el sitio web "Anime Argentina" (animeargentina.net).
+
+REGLAS DE ESTILO Y TONO (OBLIGATORIAS):
+1.  **Tono Cercano y Entusiasta**: Escribí como si le hablaras a un amigo otaku. Usá un tono cálido, alegre y apasionado por el anime.
+2.  **Saludo Inicial**: Comenzá cada artículo con un saludo como "¡Holis estrellitas!", "¡Bienvenida gente bonita!", "¡Hola cazadores!", "¡Hola nakamas!" o similar.
+3.  **Primer Párrafo (Meta Descripción)**: El primer párrafo debe ser un resumen atractivo de 150-160 caracteres que responda a la pregunta principal del lector y lo invite a seguir leyendo. NO uses la palabra "Meta Descripción" ni lo etiquetes como tal.
+4.  **Estructura con Subtítulos Atractivos**: Usá subtítulos (H2 y H3) para organizar el contenido, pero que sean creativos y no genéricos. Por ejemplo, en lugar de "Desarrollo", usá "¿Qué sabemos del proyecto?" o "Detalles de la producción".
+5.  **Desarrollo con Contexto**: No te limites a dar la noticia. Explicá por qué es importante, añadí datos curiosos y contexto. Incluí siempre una sinopsis de la serie o evento del que se habla.
+6.  **Vocabulario Otaku**: Usá términos como "mangaka", "seiyuu", "OVA", "capítulo", "temporada" de forma natural.
+7.  **Despedida**: Terminá con una despedida como "¡Nos vemos en el próximo post!", "¡Hasta la próxima, otakus!" o similar.
+8.  **Formato SEO**: Mantené la estructura SEO (H2, H3, listas, negritas) para que el artículo sea legible y esté bien posicionado, pero sin que se note la parte técnica.
+
+EJEMPLO DE TONO Y ESTRUCTURA:
+"¡Holis estrellitas de Anime Argentina! ¿Sabías que el nuevo anime de Giant Ojō-sama ya tiene fecha de estreno? La adaptación del manga de Nikumura Q llega en enero 2027 y promete ser una de las comedias más locas de la temporada.
+
+### ¿De qué trata la serie?
+La historia sigue a una 'gran señorita' que lucha por su libertad en un mundo de fantasía...
+
+### Equipo de producción
+El estudio Tatsunoko Production estará a cargo, con Hiroshi Ikehata como director..."
+
+**IMPORTANTE**: Proporcioná la salida en formato Markdown, con la estructura y el tono indicados. Evitá usar palabras como "Meta Descripción", "Desarrollo" o "Conclusión" como títulos. Los títulos deben ser narrativos y atractivos.
+"""
+
+# ============================================
 # REESCRITURA CON GROQ (IA GRATUITA)
 # ============================================
 def reescribir_con_groq(titulo, descripcion, fuente_nombre, sinopsis_data=None):
@@ -194,31 +223,12 @@ def reescribir_con_groq(titulo, descripcion, fuente_nombre, sinopsis_data=None):
         print("   ⚠️ GROQ_API_KEY no configurada. Usando traducción simple.")
         return None
 
-    # SYSTEM PROMPT con directivas Yoast SEO y formato
-    system_prompt = """Eres un redactor SEO experto para "Anime Actualidad Argentina", un blog argentino. Tu objetivo es reescribir noticias siguiendo las mejores prácticas de Yoast SEO para mejorar el posicionamiento en buscadores.
-
-**REGLAS DE SEO YOAST (OBLIGATORIAS):**
-1.  **Título SEO**: Crea un título atractivo de máximo 60 caracteres que incluya la palabra clave principal.
-2.  **Meta Descripción**: Añade al inicio un párrafo de 150-160 caracteres que resuma la noticia e invite a leer más.
-3.  **Estructura de Encabezados**: Usa ## H2 para los temas principales y ### H3 para los subtemas.
-4.  **Párrafos y Oraciones**: Escribe párrafos cortos (máximo 3-4 líneas) y oraciones de máximo 20 palabras.
-5.  **Distribución de la Palabra Clave**: Incluye tu palabra clave principal de forma natural en el título, en el primer párrafo, en al menos un H2 y distribuida en el texto.
-6.  **Legibilidad**: Usa listas con viñetas (-) para enumerar datos y palabras de transición para conectar ideas.
-7.  **Formato**: Usa **texto en negrita** para resaltar los datos más importantes.
-
-**ESTRUCTURA DEL ARTÍCULO:**
-1.  **Introducción**: Responde a la pregunta principal con el dato más impactante.
-2.  **Desarrollo**: Profundiza con cifras, nombres, citas o datos relevantes, usando listas y subtítulos.
-3.  **Conclusión**: Termina con un llamado a la acción: "¿Qué opinás? Dejanos tu comentario en Anime Actualidad Argentina"
-
-**IMPORTANTE**: Proporciona la salida en formato Markdown para que pueda estructurarse correctamente."""
-
     # Construir el mensaje del usuario
     user_prompt = f"""Fuente: {fuente_nombre}
 Título original: {titulo}
 Descripción original: {descripcion[:2000]}
 
-Reescribí esta noticia siguiendo las reglas de SEO y estructura que se te indicaron.
+Reescribí esta noticia siguiendo las reglas de estilo y SEO que se te indicaron. Desarrollá el contenido con contexto y sinopsis.
 
 {'' if not sinopsis_data else f'''
 **INFORMACIÓN ADICIONAL DEL ANIME RELACIONADO:**
@@ -242,11 +252,11 @@ URL: {sinopsis_data['url']}
             json={
                 "model": "llama-3.3-70b-versatile",
                 "messages": [
-                    {"role": "system", "content": system_prompt},
+                    {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": user_prompt}
                 ],
                 "temperature": 0.7,
-                "max_tokens": 1000  # Aumentado para dar más detalle
+                "max_tokens": 1000
             },
             timeout=45
         )
@@ -477,7 +487,7 @@ def main():
                 except Exception as e:
                     print(f"   ❌ Error al crear borrador: {e}")
 
-                time.sleep(3)  # Pausa entre noticias
+                time.sleep(3)
 
         except Exception as e:
             print(f"❌ Error procesando {nombre_fuente}: {e}")
