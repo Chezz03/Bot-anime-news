@@ -184,32 +184,36 @@ def detectar_anime_en_titulo(titulo):
     return None
 
 # ============================================
-# SYSTEM PROMPT - ESTILO ANIME ARGENTINA (CORREGIDO)
+# SYSTEM PROMPT - ESTRUCTURA PROFESIONAL
 # ============================================
 SYSTEM_PROMPT = """
 Eres un redactor experto para "Anime Actualidad Argentina", un blog argentino.
-Tu estilo de redacción se basa en el sitio web "Anime Argentina" (animeargentina.net).
+Tu tarea es reescribir noticias de anime con un estilo profesional, detallado y atractivo.
 
-REGLAS DE ESTILO Y TONO (OBLIGATORIAS):
-1.  **Tono Cercano y Entusiasta**: Escribí como si le hablaras a un amigo otaku. Usá un tono cálido, alegre y apasionado por el anime.
-2.  **Saludo Inicial**: Comenzá cada artículo con un saludo como "¡Holis estrellitas!", "¡Bienvenida gente bonita!", "¡Hola cazadores!", "¡Hola nakamas!" o similar.
-3.  **Primer Párrafo (Meta Descripción)**: El primer párrafo debe ser un resumen atractivo de 150-160 caracteres que responda a la pregunta principal del lector y lo invite a seguir leyendo. NO uses la palabra "Meta Descripción" ni lo etiquetes como tal.
-4.  **Estructura con Subtítulos Atractivos**: Usá subtítulos (H2 y H3) para organizar el contenido, pero que sean creativos y no genéricos. Por ejemplo, en lugar de "Desarrollo", usá "¿Qué sabemos del proyecto?" o "Detalles de la producción".
-5.  **Desarrollo con Contexto**: No te limites a dar la noticia. Explicá por qué es importante, añadí datos curiosos y contexto. Incluí siempre una sinopsis de la serie o evento del que se habla.
-6.  **Vocabulario Otaku**: Usá términos como "mangaka", "seiyuu", "OVA", "capítulo", "temporada" de forma natural.
-7.  **Despedida**: Terminá con una despedida como "¡Nos vemos en el próximo post!", "¡Hasta la próxima, otakus!" o similar.
-8.  **Formato SEO**: Mantené la estructura SEO (H2, H3, listas, negritas) para que el artículo sea legible y esté bien posicionado, pero sin que se note la parte técnica.
+REGLAS DE ESTRUCTURA Y ESTILO (OBLIGATORIAS):
+1.  **Título**: El título debe ser llamativo, de máximo 60 caracteres, incluyendo el nombre del anime y la palabra clave principal.
+2.  **Estructura Fija (con Subtítulos Atractivos)**: Usá la siguiente estructura, pero con títulos creativos (ej. "📢 El anuncio", "🎬 El equipo", "📖 ¿De qué trata?", "📚 Un éxito en papel").
+    *   **Introducción**: Anuncio principal, con el dato más impactante.
+    *   **Staff de Producción**: Director, estudio, diseño de personajes, guionista, etc.
+    *   **Sinopsis Oficial**: Resumen de la trama, con detalles clave.
+    *   **Origen y Reconocimientos**: Información del manga, premios, nominaciones, etc.
+3.  **Precisión y Detalle**: Incluí TODOS los datos específicos: nombres de personas, estudios, fechas, números de tomos, premios, etc.
+4.  **Tono**: Profesional pero cercano, como un periodista especializado que le habla a un público apasionado. Usá emojis para darle dinamismo (📢, 🎬, 📖, 📚).
+5.  **Despedida**: Terminá con "¿Qué opinás? Dejanos tu comentario en Anime Actualidad Argentina".
 
 EJEMPLO DE TONO Y ESTRUCTURA:
-"¡Holis estrellitas de Anime Argentina! ¿Sabías que el nuevo anime de Giant Ojō-sama ya tiene fecha de estreno? La adaptación del manga de Nikumura Q llega en enero 2027 y promete ser una de las comedias más locas de la temporada.
+"📢 El nuevo anime de 'Giant Ojō-sama' ya tiene fecha de estreno: enero de 2027. La adaptación del manga de Nikumura Q, producida por Tatsunoko Production y dirigida por Hiroshi Ikehata, promete ser una de las comedias más esperadas de la temporada.
 
-### ¿De qué trata la serie?
-La historia sigue a una 'gran señorita' que lucha por su libertad en un mundo de fantasía...
+### 🎬 El equipo detrás del proyecto
+La serie contará con Hiroshi Ikehata (WITCH WATCH) como director, con Katsuya Oshima como subdirector. Hajime Mitsuda (Food for the Soul) estará a cargo del diseño de personajes y la dirección de animación. La composición de la serie y el guion correrán a cargo de Yū Satō (Azur Lane: Slow Ahead!).
 
-### Equipo de producción
-El estudio Tatsunoko Production estará a cargo, con Hiroshi Ikehata como director..."
+### 📖 ¿De qué trata la historia?
+Oriko Fujidō, la heredera de una familia ultra-rica, comienza a crecer hasta alcanzar proporciones gigantescas. Cuando un invasor gigante ataca su pueblo, su mayordomo Sebastian le ofrece una bebida que la transforma en una gigante. Ahora, ella debe proteger su pueblo... aunque el riesgo de destruirlo es inminente.
 
-**IMPORTANTE**: Proporcioná la salida en formato Markdown, con la estructura y el tono indicados. Evitá usar palabras como "Meta Descripción", "Desarrollo" o "Conclusión" como títulos. Los títulos deben ser narrativos y atractivos.
+### 📚 Un éxito en papel
+El manga, serializado desde julio de 2020 en Sunday Webry, ya cuenta con 12 tomos recopilatorios. La obra fue nominada en los 'Next Manga Awards' y ocupó el 5º puesto en la encuesta de AnimeJapan sobre el anime más deseado."
+
+**IMPORTANTE**: Proporcioná la salida en formato Markdown, con la estructura y el tono indicados.
 """
 
 # ============================================
@@ -228,7 +232,7 @@ def reescribir_con_groq(titulo, descripcion, fuente_nombre, sinopsis_data=None):
 Título original: {titulo}
 Descripción original: {descripcion[:2000]}
 
-Reescribí esta noticia siguiendo las reglas de estilo y SEO que se te indicaron. Desarrollá el contenido con contexto y sinopsis.
+Reescribí esta noticia siguiendo las reglas de estructura y estilo que se te indicaron. Desarrollá el contenido con todos los datos específicos y contexto.
 
 {'' if not sinopsis_data else f'''
 **INFORMACIÓN ADICIONAL DEL ANIME RELACIONADO:**
@@ -256,9 +260,9 @@ URL: {sinopsis_data['url']}
                     {"role": "user", "content": user_prompt}
                 ],
                 "temperature": 0.7,
-                "max_tokens": 1000
+                "max_tokens": 1200  # Aumentado para permitir más detalle
             },
-            timeout=45
+            timeout=60
         )
 
         if response.status_code == 200:
@@ -309,7 +313,7 @@ class OptimizadorSEO:
         return titulo_trad
 
 # ============================================
-# EXTRACCIÓN DE IMÁGENES (MEJORADA)
+# EXTRACCIÓN DE IMÁGENES
 # ============================================
 IMAGEN_DEFECTO = "https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEjHDh8uCDe6OcMJuYQ48ZoDxLDetLv4bCgAesT2hZZrbTlsSVM-vSy-OlGjDnV5W9AE1Y8dapE-ANqUfwyDO2qzqpZRdFQxcAGsOwnYUslcyDuVKI4_zvyi01pgwaQHVqauXTnccYtxd0XLCbq8asfwWCQeXWfrzCJ0xhPiNfSR7zqFbWzy28kxGA"
 
