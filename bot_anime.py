@@ -6,16 +6,13 @@ import os
 import markdown
 from datetime import datetime
 import time
-from google.oauth2.credentials import Credentials
-from googleapiclient.discovery import build
-from google.auth.transport.requests import Request
-from google_auth_oauthlib.flow import InstalledAppFlow
 from bs4 import BeautifulSoup
 
 # ============================================
 # CONFIGURACIÓN (Variables de entorno)
 # ============================================
 BLOGGER_BLOG_ID = os.environ.get("BLOGGER_BLOG_ID", "")
+BLOGGER_API_KEY = os.environ.get("BLOGGER_API_KEY", "")  # NUEVA
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
 MODO_PRUEBA = os.environ.get("MODO_PRUEBA", "False").lower() == "true"
@@ -42,8 +39,6 @@ RSS_FEEDS = {
     }
 }
 
-SCOPES = ['https://www.googleapis.com/auth/blogger']
-
 # ============================================
 # CONTROL DE DUPLICADOS
 # ============================================
@@ -61,26 +56,27 @@ def guardar_procesados(procesados):
         json.dump(list(procesados), f, ensure_ascii=False, indent=2)
 
 # ============================================
-# AUTENTICACIÓN BLOGGER
+# CREAR BORRADOR CON API KEY
 # ============================================
-def autenticar_blogger():
-    """Autentica con OAuth 2.0 y devuelve el servicio de Blogger"""
-    creds = None
-    if os.path.exists('token.json'):
-        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
-
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
-            creds = flow.run_local_server(port=0)
-
-        with open('token.json', 'w') as token:
-            token.write(creds.to_json())
-
-    service = build('blogger', 'v3', credentials=creds)
-    return service
+def crear_borrador_con_api_key(titulo, contenido, etiquetas, blog_id, api_key):
+    """Crea un borrador en Blogger usando API Key."""
+    url = f"https://www.googleapis.com/blogger/v3/blogs/{blog_id}/posts/"
+    payload = {
+        "kind": "blogger#post",
+        "status": "DRAFT",
+        "title": titulo,
+        "content": contenido,
+        "labels": etiquetas
+    }
+    try:
+        response = requests.post(url, params={"key": api_key}, json=payload, timeout=30)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        print(f"   ❌ Error al crear borrador: {e}")
+        if hasattr(e, 'response') and e.response:
+            print(f"   Respuesta: {e.response.text}")
+        return None
 
 # ============================================
 # TRADUCCIÓN (RESPALDO)
@@ -113,10 +109,8 @@ class Traductor:
 # BÚSQUEDA DE SINOPSIS EN ANILIST
 # ============================================
 def buscar_sinopsis_anilist(titulo_anime):
-    """Busca un anime en AniList y devuelve su sinopsis, géneros y puntaje."""
     if not titulo_anime or len(titulo_anime) < 3:
         return None
-
     query = """
     query ($search: String) {
       Media(search: $search, type: ANIME) {
@@ -134,7 +128,6 @@ def buscar_sinopsis_anilist(titulo_anime):
     """
     variables = {'search': titulo_anime}
     url = 'https://graphql.anilist.co'
-
     try:
         response = requests.post(
             url,
@@ -166,20 +159,16 @@ def buscar_sinopsis_anilist(titulo_anime):
 # DETECCIÓN DE ANIME EN EL TEXTO
 # ============================================
 def detectar_anime_en_titulo(titulo):
-    """Detecta posibles nombres de anime en el título de la noticia."""
     ignorar = ['switch', 'playstation', 'xbox', 'steam', 'nintendo', 'ventas',
                'mercado', 'argentina', 'mundo', 'juego', 'consola', 'videojuego']
-
     patrones = [
         r'"([^"]+)"', r'「([^」]+)」', r'《([^》]+)》', r'\(([^)]+)\)'
     ]
-
     for patron in patrones:
         matches = re.findall(patron, titulo)
         for match in matches:
             if len(match) > 2 and not any(p in match.lower() for p in ignorar):
                 return match
-
     palabras = titulo.split()
     for i, palabra in enumerate(palabras):
         if palabra[0].isupper() and len(palabra) > 2:
@@ -188,10 +177,9 @@ def detectar_anime_en_titulo(titulo):
     return None
 
 # ============================================
-# EXTRACCIÓN DE TEXTO COMPLETO DESDE LA PÁGINA
+# EXTRACCIÓN DE TEXTO COMPLETO
 # ============================================
 def extraer_texto_completo(url):
-    """Entra a la página del artículo y extrae el contenido principal."""
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
@@ -199,14 +187,12 @@ def extraer_texto_completo(url):
         response = requests.get(url, headers=headers, timeout=15)
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, 'html.parser')
-            # Buscar el contenido en selectores comunes
             for selector in ['article', '.article-body', '.content', '#content', '.post-content', '.meat']:
                 content = soup.select_one(selector)
                 if content:
                     texto = content.get_text(separator='\n', strip=True)
                     if len(texto) > 200:
                         return texto[:3000]
-            # Si no encuentra, intentar con todo el body
             body = soup.find('body')
             if body:
                 texto = body.get_text(separator='\n', strip=True)
@@ -242,10 +228,8 @@ REGLAS DE ESTRUCTURA Y ESTILO (OBLIGATORIAS):
 # REESCRITURA CON DEEPSEEK O GROQ
 # ============================================
 def reescribir_con_deepseek(titulo, descripcion, fuente_nombre, sinopsis_data=None):
-    """Usa DeepSeek para reescribir la noticia."""
     if not DEEPSEEK_API_KEY:
         return None
-
     user_prompt = f"""Fuente: {fuente_nombre}
 Título original: {titulo}
 Descripción original: {descripcion[:2000]}
@@ -260,7 +244,6 @@ Géneros: {sinopsis_data['generos']}
 Puntaje en AniList: {sinopsis_data['puntaje']}/100
 '''}
 """
-
     try:
         response = requests.post(
             "https://api.deepseek.com/v1/chat/completions",
@@ -291,10 +274,8 @@ Puntaje en AniList: {sinopsis_data['puntaje']}/100
         return None
 
 def reescribir_con_groq(titulo, descripcion, fuente_nombre, sinopsis_data=None):
-    """Respaldo con Groq si DeepSeek falla."""
     if not GROQ_API_KEY:
         return None
-
     user_prompt = f"""Fuente: {fuente_nombre}
 Título original: {titulo}
 Descripción original: {descripcion[:2000]}
@@ -309,7 +290,6 @@ Géneros: {sinopsis_data['generos']}
 Puntaje en AniList: {sinopsis_data['puntaje']}/100
 '''}
 """
-
     try:
         response = requests.post(
             "https://api.groq.com/openai/v1/chat/completions",
@@ -440,21 +420,14 @@ def main():
         print("❌ Error: BLOGGER_BLOG_ID no está configurado")
         return
 
+    if not BLOGGER_API_KEY:
+        print("❌ Error: BLOGGER_API_KEY no está configurada")
+        return
+
     print(f"✅ Blog ID: {BLOGGER_BLOG_ID}")
     print(f"🧠 Reescritura con DeepSeek: {'ACTIVADA' if DEEPSEEK_API_KEY else 'desactivada'}")
     print(f"🧠 Reescritura con Groq (respaldo): {'ACTIVADA' if GROQ_API_KEY else 'desactivada'}")
     print(f"🧪 Modo prueba: {'ACTIVADO' if MODO_PRUEBA else 'desactivado'}")
-
-    if not os.path.exists('credentials.json'):
-        print("❌ Error: No se encontró el archivo credentials.json")
-        return
-
-    try:
-        service = autenticar_blogger()
-        print("✅ Autenticación exitosa")
-    except Exception as e:
-        print(f"❌ Error de autenticación: {e}")
-        return
 
     traductor = Traductor()
     seo = OptimizadorSEO()
@@ -470,13 +443,11 @@ def main():
             for entry in feed.entries[:5]:
                 enlace = entry.link
 
-                # Verificar duplicado
                 if enlace in procesados:
                     print(f"   ⏭️ Noticia ya procesada: {entry.title[:50]}...")
                     continue
 
                 try:
-                    # ---- EXTRAER DESCRIPCIÓN COMPLETA ----
                     descripcion = entry.description if 'description' in entry else ''
                     if not descripcion or len(descripcion) < 100:
                         print(f"   🔍 Descripción corta, extrayendo de la página...")
@@ -488,7 +459,6 @@ def main():
                             if descripcion:
                                 descripcion = re.sub(r'<[^>]+>', ' ', descripcion)
 
-                    # ---- DETECTAR ANIME ----
                     nombre_anime = detectar_anime_en_titulo(entry.title)
                     sinopsis_data = None
                     if nombre_anime:
@@ -497,7 +467,6 @@ def main():
                         if sinopsis_data:
                             print(f"   ✅ Sinopsis obtenida para: {sinopsis_data['titulo']}")
 
-                    # ---- REESCRITURA ----
                     texto_markdown = reescribir_con_deepseek(
                         entry.title, descripcion[:2000], nombre_fuente, sinopsis_data
                     )
@@ -506,7 +475,6 @@ def main():
                             entry.title, descripcion[:2000], nombre_fuente, sinopsis_data
                         )
 
-                    # ---- TÍTULO TRADUCIDO ----
                     titulo_trad = traductor.traducir(entry.title)
                     titulo_trad = seo.optimizar_titulo(titulo_trad)
 
@@ -515,22 +483,23 @@ def main():
                         texto_markdown = traductor.traducir(descripcion[:500]) if descripcion else "Noticia sin descripción."
                         texto_markdown = f"**{entry.title}**\n\n{texto_markdown}"
 
-                    # ---- FORMATO Y PUBLICACIÓN ----
                     imagen = extraer_imagen(entry)
                     contenido = formatear_contenido(texto_markdown, imagen, enlace, config_fuente)
 
                     if MODO_PRUEBA:
                         print(f"   🧪 [PRUEBA] Borrador simulado: {titulo_trad[:50]}...")
                     else:
-                        post = {
-                            'title': titulo_trad,
-                            'content': contenido,
-                            'labels': config_fuente['etiquetas'],
-                            'status': 'DRAFT'  # ✅ BORRADOR
-                        }
-                        # SOLO ESTA LLAMADA, nada de update o publish después
-                        result = service.posts().insert(blogId=BLOGGER_BLOG_ID, body=post).execute()
-                        print(f"   ✅ Borrador creado (ID: {result.get('id')}) - {titulo_trad[:50]}...")
+                        resultado = crear_borrador_con_api_key(
+                            titulo_trad,
+                            contenido,
+                            config_fuente['etiquetas'],
+                            BLOGGER_BLOG_ID,
+                            BLOGGER_API_KEY
+                        )
+                        if resultado:
+                            print(f"   ✅ Borrador creado (ID: {resultado.get('id')}) - {titulo_trad[:50]}...")
+                        else:
+                            print(f"   ❌ Falló la creación del borrador.")
 
                     procesados.add(enlace)
                     guardar_procesados(procesados)
