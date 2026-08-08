@@ -10,13 +10,14 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import InstalledAppFlow
+from bs4 import BeautifulSoup
 
 # ============================================
 # CONFIGURACIÓN (Variables de entorno)
 # ============================================
 BLOGGER_BLOG_ID = os.environ.get("BLOGGER_BLOG_ID", "")
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")  # Opcional, mantener como respaldo
-DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")  # Nueva opción
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
 MODO_PRUEBA = os.environ.get("MODO_PRUEBA", "False").lower() == "true"
 PROCESADOS_FILE = "procesados.json"
 
@@ -60,7 +61,7 @@ def guardar_procesados(procesados):
         json.dump(list(procesados), f, ensure_ascii=False, indent=2)
 
 # ============================================
-# AUTENTICACIÓN BLOGGER (sin cambios)
+# AUTENTICACIÓN BLOGGER
 # ============================================
 def autenticar_blogger():
     """Autentica con OAuth 2.0 y devuelve el servicio de Blogger"""
@@ -109,7 +110,7 @@ class Traductor:
         return texto
 
 # ============================================
-# BÚSQUEDA DE SINOPSIS EN ANILIST (sin cambios)
+# BÚSQUEDA DE SINOPSIS EN ANILIST
 # ============================================
 def buscar_sinopsis_anilist(titulo_anime):
     """Busca un anime en AniList y devuelve su sinopsis, géneros y puntaje."""
@@ -162,7 +163,7 @@ def buscar_sinopsis_anilist(titulo_anime):
     return None
 
 # ============================================
-# DETECCIÓN DE ANIME EN EL TEXTO (sin cambios)
+# DETECCIÓN DE ANIME EN EL TEXTO
 # ============================================
 def detectar_anime_en_titulo(titulo):
     """Detecta posibles nombres de anime en el título de la noticia."""
@@ -187,7 +188,37 @@ def detectar_anime_en_titulo(titulo):
     return None
 
 # ============================================
-# SYSTEM PROMPT (tu mismo prompt, sin cambios)
+# EXTRACCIÓN DE TEXTO COMPLETO DESDE LA PÁGINA
+# ============================================
+def extraer_texto_completo(url):
+    """Entra a la página del artículo y extrae el contenido principal."""
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        }
+        response = requests.get(url, headers=headers, timeout=15)
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, 'html.parser')
+            # Buscar el contenido en selectores comunes
+            for selector in ['article', '.article-body', '.content', '#content', '.post-content', '.meat']:
+                content = soup.select_one(selector)
+                if content:
+                    texto = content.get_text(separator='\n', strip=True)
+                    if len(texto) > 200:
+                        return texto[:3000]
+            # Si no encuentra, intentar con todo el body
+            body = soup.find('body')
+            if body:
+                texto = body.get_text(separator='\n', strip=True)
+                if len(texto) > 200:
+                    return texto[:3000]
+        return None
+    except Exception as e:
+        print(f"   ⚠️ Error extrayendo texto completo: {e}")
+        return None
+
+# ============================================
+# SYSTEM PROMPT
 # ============================================
 SYSTEM_PROMPT = """
 Eres un redactor experto para "Anime Actualidad Argentina", un blog argentino.
@@ -208,10 +239,10 @@ REGLAS DE ESTRUCTURA Y ESTILO (OBLIGATORIAS):
 """
 
 # ============================================
-# REESCRITURA CON DEEPSEEK (NUEVO) O GROQ (RESPALDO)
+# REESCRITURA CON DEEPSEEK O GROQ
 # ============================================
 def reescribir_con_deepseek(titulo, descripcion, fuente_nombre, sinopsis_data=None):
-    """Usa DeepSeek para reescribir la noticia (más económico y mejor contexto)."""
+    """Usa DeepSeek para reescribir la noticia."""
     if not DEEPSEEK_API_KEY:
         return None
 
@@ -219,7 +250,7 @@ def reescribir_con_deepseek(titulo, descripcion, fuente_nombre, sinopsis_data=No
 Título original: {titulo}
 Descripción original: {descripcion[:2000]}
 
-Reescribí esta noticia siguiendo las reglas de estructura y estilo que se te indicaron. Desarrollá el contenido con todos los datos específicos y contexto.
+Reescribí esta noticia siguiendo las reglas de estructura y estilo que se te indicaron.
 
 {'' if not sinopsis_data else f'''
 **INFORMACIÓN ADICIONAL DEL ANIME RELACIONADO:**
@@ -227,9 +258,6 @@ Título: {sinopsis_data['titulo']}
 Sinopsis: {sinopsis_data['sinopsis']}
 Géneros: {sinopsis_data['generos']}
 Puntaje en AniList: {sinopsis_data['puntaje']}/100
-URL: {sinopsis_data['url']}
-
-**Importante:** Si la noticia habla de este anime, incluye su sinopsis y datos de manera natural en el desarrollo del artículo.
 '''}
 """
 
@@ -312,7 +340,7 @@ Puntaje en AniList: {sinopsis_data['puntaje']}/100
         return None
 
 # ============================================
-# CONVERSIÓN DE MARKDOWN A HTML (sin cambios)
+# CONVERSIÓN DE MARKDOWN A HTML
 # ============================================
 def convertir_markdown_a_html(texto_markdown):
     if not texto_markdown:
@@ -324,7 +352,7 @@ def convertir_markdown_a_html(texto_markdown):
         return texto_markdown.replace('\n', '<br>')
 
 # ============================================
-# OPTIMIZADOR SEO (sin cambios)
+# OPTIMIZADOR SEO
 # ============================================
 class OptimizadorSEO:
     def __init__(self):
@@ -335,7 +363,7 @@ class OptimizadorSEO:
         return titulo_trad
 
 # ============================================
-# EXTRACCIÓN DE IMÁGENES (sin cambios)
+# EXTRACCIÓN DE IMÁGENES
 # ============================================
 IMAGEN_DEFECTO = "https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEjHDh8uCDe6OcMJuYQ48ZoDxLDetLv4bCgAesT2hZZrbTlsSVM-vSy-OlGjDnV5W9AE1Y8dapE-ANqUfwyDO2qzqpZRdFQxcAGsOwnYUslcyDuVKI4_zvyi01pgwaQHVqauXTnccYtxd0XLCbq8asfwWCQeXWfrzCJ0xhPiNfSR7zqFbWzy28kxGA"
 
@@ -375,7 +403,7 @@ def extraer_imagen(entry):
     return IMAGEN_DEFECTO
 
 # ============================================
-# FORMATO DEL POST (sin cambios)
+# FORMATO DEL POST
 # ============================================
 def formatear_contenido(texto_markdown, imagen, enlace, fuente):
     texto_html = convertir_markdown_a_html(texto_markdown)
@@ -396,12 +424,12 @@ def formatear_contenido(texto_markdown, imagen, enlace, fuente):
 </a>
 </p>
 <p style="text-align:center;font-size:0.8rem;color:#9a9a9a;">
-Publicado por Anime Actualidad Argentina
+Publicado automáticamente por Bot de Anime Actualidad Argentina
 </p>
 """
 
 # ============================================
-# FUNCIÓN PRINCIPAL (MEJORADA)
+# FUNCIÓN PRINCIPAL
 # ============================================
 def main():
     print("="*60)
@@ -448,11 +476,19 @@ def main():
                     continue
 
                 try:
+                    # ---- EXTRAER DESCRIPCIÓN COMPLETA ----
                     descripcion = entry.description if 'description' in entry else ''
-                    if not descripcion and 'summary' in entry:
-                        descripcion = entry.summary
+                    if not descripcion or len(descripcion) < 100:
+                        print(f"   🔍 Descripción corta, extrayendo de la página...")
+                        descripcion_completa = extraer_texto_completo(enlace)
+                        if descripcion_completa:
+                            descripcion = descripcion_completa
+                        else:
+                            descripcion = entry.summary if 'summary' in entry else ''
+                            if descripcion:
+                                descripcion = re.sub(r'<[^>]+>', ' ', descripcion)
 
-                    # Detectar anime
+                    # ---- DETECTAR ANIME ----
                     nombre_anime = detectar_anime_en_titulo(entry.title)
                     sinopsis_data = None
                     if nombre_anime:
@@ -461,7 +497,7 @@ def main():
                         if sinopsis_data:
                             print(f"   ✅ Sinopsis obtenida para: {sinopsis_data['titulo']}")
 
-                    # Reescritura (DeepSeek primero, luego Groq)
+                    # ---- REESCRITURA ----
                     texto_markdown = reescribir_con_deepseek(
                         entry.title, descripcion[:2000], nombre_fuente, sinopsis_data
                     )
@@ -470,31 +506,31 @@ def main():
                             entry.title, descripcion[:2000], nombre_fuente, sinopsis_data
                         )
 
-                    if texto_markdown:
-                        titulo_trad = traductor.traducir(entry.title)
-                        titulo_trad = seo.optimizar_titulo(titulo_trad)
-                    else:
+                    # ---- TÍTULO TRADUCIDO ----
+                    titulo_trad = traductor.traducir(entry.title)
+                    titulo_trad = seo.optimizar_titulo(titulo_trad)
+
+                    if not texto_markdown:
                         print("   🔄 Usando traducción de respaldo")
-                        titulo_trad = traductor.traducir(entry.title)
-                        titulo_trad = seo.optimizar_titulo(titulo_trad)
                         texto_markdown = traductor.traducir(descripcion[:500]) if descripcion else "Noticia sin descripción."
                         texto_markdown = f"**{entry.title}**\n\n{texto_markdown}"
 
+                    # ---- FORMATO Y PUBLICACIÓN ----
                     imagen = extraer_imagen(entry)
                     contenido = formatear_contenido(texto_markdown, imagen, enlace, config_fuente)
 
-                    # Publicar o simular
                     if MODO_PRUEBA:
-                        print(f"   🧪 [PRUEBA] Borrador creado: {titulo_trad[:50]}...")
+                        print(f"   🧪 [PRUEBA] Borrador simulado: {titulo_trad[:50]}...")
                     else:
                         post = {
                             'title': titulo_trad,
                             'content': contenido,
                             'labels': config_fuente['etiquetas'],
-                            'status': 'DRAFT'
+                            'status': 'DRAFT'  # ✅ BORRADOR
                         }
+                        # SOLO ESTA LLAMADA, nada de update o publish después
                         result = service.posts().insert(blogId=BLOGGER_BLOG_ID, body=post).execute()
-                        print(f"   ✅ Borrador creado: {titulo_trad[:50]}...")
+                        print(f"   ✅ Borrador creado (ID: {result.get('id')}) - {titulo_trad[:50]}...")
 
                     procesados.add(enlace)
                     guardar_procesados(procesados)
