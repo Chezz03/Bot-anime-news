@@ -1,16 +1,18 @@
 name: Ejecutar Bot Recolector (Bot 1)
 
 on:
+  # Programar para que se ejecute cada 6 horas (a las 0:00, 6:00, 12:00, 18:00 UTC)
   schedule:
-    - cron: '0 */6 * * *'  # Cada 6 horas
-  workflow_dispatch:        # Permite ejecución manual
+    - cron: '0 */6 * * *'
+  # Permite ejecutarlo manualmente desde la interfaz de GitHub
+  workflow_dispatch:
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 📥 Clonar repositorio
+      - name: 📥 Clonar el repositorio
         uses: actions/checkout@v4
 
       - name: 🐍 Configurar Python 3.9
@@ -21,18 +23,20 @@ jobs:
       - name: 📦 Instalar dependencias
         run: pip install -r requirements.txt
 
-      - name: 🔐 Crear archivo credentials.json desde Secret
+      - name: 🤖 Ejecutar Bot 1 (Recolector)
         env:
-          CREDENTIALS_JSON: ${{ secrets.CREDENTIALS_JSON }}
-        run: echo "$CREDENTIALS_JSON" > credentials.json
-
-- name: 🤖 Ejecutar Bot 1 (Recolector)
-  env:
-    BLOGGER_BLOG_ID: ${{ secrets.BLOGGER_BLOG_ID }}
-    BLOGGER_API_KEY: ${{ secrets.BLOGGER_API_KEY }}  # NUEVO
-    DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-    GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-  run: python bot_anime.py
+          # Credenciales de Blogger (API Key)
+          BLOGGER_BLOG_ID: ${{ secrets.BLOGGER_BLOG_ID }}
+          BLOGGER_API_KEY: ${{ secrets.BLOGGER_API_KEY }}
+          
+          # Claves de IA (DeepSeek y Groq como respaldo)
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          
+          # Modo prueba (True o False)
+          MODO_PRUEBA: ${{ secrets.MODO_PRUEBA }}
+          
+        run: python bot_anime.py
 
       - name: 💾 Guardar archivo de procesados (opcional)
         uses: actions/upload-artifact@v4
