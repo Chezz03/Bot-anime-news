@@ -36,7 +36,7 @@ jobs:
           # Modo prueba (True o False)
           MODO_PRUEBA: ${{ secrets.MODO_PRUEBA }}
           
-        run: python bot_anime.py
+        run: python bot_anime.py 
 
       - name: 💾 Guardar archivo de procesados (opcional)
         uses: actions/upload-artifact@v4
