@@ -8,11 +8,20 @@ from datetime import datetime
 import time
 from bs4 import BeautifulSoup
 
+# NUEVAS LIBRERÍAS PARA OAUTH 2.0
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+from google.auth.transport.requests import Request
+
 # ============================================
 # CONFIGURACIÓN (Variables de entorno)
 # ============================================
 BLOGGER_BLOG_ID = os.environ.get("BLOGGER_BLOG_ID", "")
-BLOGGER_API_KEY = os.environ.get("BLOGGER_API_KEY", "")  # NUEVA
+# YA NO USAMOS API KEY, AHORA USAMOS REFRESH TOKEN
+BLOGGER_REFRESH_TOKEN = os.environ.get("BLOGGER_REFRESH_TOKEN", "") 
+BLOGGER_CLIENT_ID = "880402856138-gfv4jocf7kjfvict33e5j9j8601u4s9m.apps.googleusercontent.com"
+BLOGGER_CLIENT_SECRET = os.environ.get("BLOGGER_CLIENT_SECRET", "") # <--- AHORA LO TOMA DE GITHUB SECRETS
+
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
 MODO_PRUEBA = os.environ.get("MODO_PRUEBA", "False").lower() == "true"
@@ -56,26 +65,42 @@ def guardar_procesados(procesados):
         json.dump(list(procesados), f, ensure_ascii=False, indent=2)
 
 # ============================================
-# CREAR BORRADOR CON API KEY
+# CREAR BORRADOR CON OAUTH 2.0 (ACTUALIZADO)
 # ============================================
-def crear_borrador_con_api_key(titulo, contenido, etiquetas, blog_id, api_key):
-    """Crea un borrador en Blogger usando API Key."""
-    url = f"https://www.googleapis.com/blogger/v3/blogs/{blog_id}/posts/"
-    payload = {
-        "kind": "blogger#post",
-        "status": "DRAFT",
-        "title": titulo,
-        "content": contenido,
-        "labels": etiquetas
-    }
+def crear_borrador_con_oauth(titulo, contenido, etiquetas, blog_id, refresh_token, client_id, client_secret):
+    """Crea un borrador en Blogger usando OAuth 2.0 (Refresh Token)."""
     try:
-        response = requests.post(url, params={"key": api_key}, json=payload, timeout=30)
-        response.raise_for_status()
-        return response.json()
+        # 1. Crear el objeto de credenciales con el Refresh Token
+        creds = Credentials(
+            token=None,
+            refresh_token=refresh_token,
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=client_id,
+            client_secret=client_secret
+        )
+        
+        # 2. Si el token ha expirado, lo refresca automáticamente
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+
+        # 3. Construir el servicio de Blogger
+        service = build('blogger', 'v3', credentials=creds)
+
+        # 4. Preparar el cuerpo del post
+        post_body = {
+            "kind": "blogger#post",
+            "status": "DRAFT",
+            "title": titulo,
+            "content": contenido,
+            "labels": etiquetas
+        }
+
+        # 5. Ejecutar la inserción
+        resultado = service.posts().insert(blogId=blog_id, body=post_body).execute()
+        return resultado
+
     except Exception as e:
-        print(f"   ❌ Error al crear borrador: {e}")
-        if hasattr(e, 'response') and e.response:
-            print(f"   Respuesta: {e.response.text}")
+        print(f"   ❌ Error al crear borrador con OAuth: {e}")
         return None
 
 # ============================================
@@ -420,8 +445,12 @@ def main():
         print("❌ Error: BLOGGER_BLOG_ID no está configurado")
         return
 
-    if not BLOGGER_API_KEY:
-        print("❌ Error: BLOGGER_API_KEY no está configurada")
+    if not BLOGGER_REFRESH_TOKEN:
+        print("❌ Error: BLOGGER_REFRESH_TOKEN no está configurado")
+        return
+
+    if not BLOGGER_CLIENT_SECRET:
+        print("❌ Error: BLOGGER_CLIENT_SECRET no está configurado (ponlo en Secrets)")
         return
 
     print(f"✅ Blog ID: {BLOGGER_BLOG_ID}")
@@ -489,13 +518,17 @@ def main():
                     if MODO_PRUEBA:
                         print(f"   🧪 [PRUEBA] Borrador simulado: {titulo_trad[:50]}...")
                     else:
-                        resultado = crear_borrador_con_api_key(
+                        # ------- CAMBIO IMPORTANTE AQUÍ --------
+                        resultado = crear_borrador_con_oauth(
                             titulo_trad,
                             contenido,
                             config_fuente['etiquetas'],
                             BLOGGER_BLOG_ID,
-                            BLOGGER_API_KEY
+                            BLOGGER_REFRESH_TOKEN,
+                            BLOGGER_CLIENT_ID,
+                            BLOGGER_CLIENT_SECRET
                         )
+                        # ----------------------------------------
                         if resultado:
                             print(f"   ✅ Borrador creado (ID: {resultado.get('id')}) - {titulo_trad[:50]}...")
                         else:
