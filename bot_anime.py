@@ -22,23 +22,19 @@ BLOGGER_REFRESH_TOKEN = os.environ.get("BLOGGER_REFRESH_TOKEN", "")
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 
-# Acepta "True", "true", "1" como verdadero; cualquier otra cosa (o vacío) es falso
+# Acepta "True", "true", "1" como verdadero
 MODO_PRUEBA = os.environ.get("MODO_PRUEBA", "False").strip().lower() in ("true", "1", "si", "sí")
 
 ARCHIVO_PROCESADOS = "procesados.json"
-MAX_PROCESADOS_GUARDADOS = 500  # evita que el archivo crezca indefinidamente
-MAX_NOTICIAS_POR_FEED = 5
+MAX_PROCESADOS_GUARDADOS = 500
+MAX_NOTICIAS_POR_FEED = 10  # Aumentado para compensar el filtro
 
+# Fuente RSS de ANN (solo noticias)
 RSS_FEEDS = {
     "animenewsnetwork": {
-        "url": "https://www.animenewsnetwork.com/all/rss.xml",
+        "url": "https://www.animenewsnetwork.com/newsfeed/rss.xml",
         "categoria": "Noticias",
-        "etiquetas": ["Anime", "Internacional", "Reseñas"]
-    },
-    "crunchyroll": {
-        "url": "https://www.crunchyroll.com/es/news/feed/rss",
-        "categoria": "Noticias",
-        "etiquetas": ["Anime", "Estrenos", "Crunchyroll"]
+        "etiquetas": ["Anime", "Internacional", "Noticias"]
     }
 }
 
@@ -48,7 +44,6 @@ SCOPES = ['https://www.googleapis.com/auth/blogger']
 # PROCESADOS (evitar duplicados)
 # ============================================
 def cargar_procesados():
-    """Carga la lista de links ya procesados desde procesados.json"""
     if not os.path.exists(ARCHIVO_PROCESADOS):
         return set()
     try:
@@ -60,7 +55,6 @@ def cargar_procesados():
         return set()
 
 def guardar_procesados(links_procesados):
-    """Guarda la lista de links procesados, recortando al máximo permitido"""
     lista = list(links_procesados)[-MAX_PROCESADOS_GUARDADOS:]
     try:
         with open(ARCHIVO_PROCESADOS, "w", encoding="utf-8") as f:
@@ -72,8 +66,6 @@ def guardar_procesados(links_procesados):
 # AUTENTICACIÓN BLOGGER (OAuth con refresh token)
 # ============================================
 def autenticar_blogger():
-    """Autentica con OAuth 2.0 usando un refresh token (sin navegador, apto para CI)"""
-
     if not BLOGGER_REFRESH_TOKEN:
         raise ValueError("BLOGGER_REFRESH_TOKEN no está configurado")
     if not BLOGGER_CLIENT_ID:
@@ -89,18 +81,17 @@ def autenticar_blogger():
         client_secret=BLOGGER_CLIENT_SECRET,
         scopes=SCOPES,
     )
-
-    creds.refresh(Request())  # canjea el refresh token por un access token válido
+    creds.refresh(Request())
     return build('blogger', 'v3', credentials=creds)
 
 # ============================================
-# EXTRACCIÓN DE CONTENIDO COMPLETO (NUEVO)
+# EXTRACCIÓN DE CONTENIDO COMPLETO (MEJORADA)
 # ============================================
 def extraer_contenido_completo(url):
     """
     Entra a la página del artículo y extrae:
     - Texto completo del artículo
-    - Imagen destacada (og:image o primera imagen grande)
+    - Imagen destacada (priorizando og:image)
     """
     try:
         headers = {
@@ -114,26 +105,38 @@ def extraer_contenido_completo(url):
 
         # ---- 1. EXTRAER IMAGEN DESTACADA ----
         imagen = None
-        # Buscar en meta tags (og:image)
+        
+        # 1.1 Buscar en meta tags (og:image)
         og_image = soup.find('meta', property='og:image')
         if og_image and og_image.get('content'):
             imagen = og_image['content']
+            print(f"   🖼️  Imagen encontrada en og:image")
         else:
-            # Buscar la primera imagen grande del artículo
-            for img in soup.find_all('img'):
-                src = img.get('src') or img.get('data-src')
-                if src and ('jpg' in src or 'png' in src or 'jpeg' in src):
-                    width = img.get('width')
-                    height = img.get('height')
-                    if (width and int(width) > 200) or (height and int(height) > 200):
-                        if not src.startswith('http'):
-                            src = 'https:' + src if src.startswith('//') else src
-                        imagen = src
-                        break
+            # 1.2 Buscar en meta tag twitter:image
+            twitter_image = soup.find('meta', attrs={'name': 'twitter:image'})
+            if twitter_image and twitter_image.get('content'):
+                imagen = twitter_image['content']
+                print(f"   🖼️  Imagen encontrada en twitter:image")
+            else:
+                # 1.3 Buscar la primera imagen dentro del contenido del artículo
+                contenido = soup.find('div', class_='meat') or soup.find('div', id='content') or soup.find('article')
+                if contenido:
+                    # Buscar la primera imagen dentro del contenido
+                    for img in contenido.find_all('img'):
+                        src = img.get('src') or img.get('data-src')
+                        if src and ('jpg' in src.lower() or 'png' in src.lower() or 'jpeg' in src.lower()):
+                            if not src.startswith('http'):
+                                src = 'https:' + src if src.startswith('//') else src
+                            # Evitar iconos o imágenes muy pequeñas
+                            width = img.get('width')
+                            height = img.get('height')
+                            if (width and int(width) > 100) or (height and int(height) > 100):
+                                imagen = src
+                                print(f"   🖼️  Imagen encontrada en el contenido")
+                                break
 
         # ---- 2. EXTRAER TEXTO COMPLETO ----
         texto = None
-        # Buscar en selectores comunes de ANN
         contenido = soup.find('div', class_='meat')
         if not contenido:
             contenido = soup.find('div', id='content')
@@ -143,11 +146,9 @@ def extraer_contenido_completo(url):
             contenido = soup.find('body')
 
         if contenido:
-            # Eliminar elementos no deseados
             for tag in contenido.find_all(['script', 'style', 'noscript', 'iframe', 'ins']):
                 tag.decompose()
             texto = contenido.get_text(separator='\n', strip=True)
-            # Limpiar exceso de espacios y saltos de línea
             texto = re.sub(r'\n\s*\n', '\n\n', texto)
             texto = re.sub(r'[ \t]+', ' ', texto)
 
@@ -160,12 +161,6 @@ def extraer_contenido_completo(url):
 # REESCRITURA CON IA (DeepSeek primero, Groq de respaldo)
 # ============================================
 class IARedactor:
-    """
-    Traduce y reescribe título + descripción en español, con tono periodístico
-    y SEO-friendly, usando DeepSeek como proveedor principal y Groq como respaldo.
-    Si ambos fallan, devuelve el texto original sin modificar.
-    """
-
     PROMPT_SISTEMA = (
         "Sos un redactor de noticias de anime en español (de Argentina). "
         "Tu tarea es traducir y reescribir brevemente el título y la descripción "
@@ -207,7 +202,7 @@ class IARedactor:
                 contenido = data["choices"][0]["message"]["content"]
                 return self._parsear_json(contenido)
             else:
-                print(f"   ⚠️ DeepSeek respondió {response.status_code}: {response.text[:200]}")
+                print(f"   ⚠️ DeepSeek respondió {response.status_code}")
                 return None
         except Exception as e:
             print(f"   ⚠️ Error llamando a DeepSeek: {e}")
@@ -236,14 +231,13 @@ class IARedactor:
                 contenido = data["choices"][0]["message"]["content"]
                 return self._parsear_json(contenido)
             else:
-                print(f"   ⚠️ Groq respondió {response.status_code}: {response.text[:200]}")
+                print(f"   ⚠️ Groq respondió {response.status_code}")
                 return None
         except Exception as e:
             print(f"   ⚠️ Error llamando a Groq: {e}")
             return None
 
     def _parsear_json(self, contenido):
-        """Extrae el JSON de la respuesta de la IA, tolerando texto extra o bloques ```json"""
         try:
             contenido = contenido.strip()
             contenido = re.sub(r'^```json\s*|\s*```$', '', contenido, flags=re.MULTILINE).strip()
@@ -255,10 +249,6 @@ class IARedactor:
         return None
 
     def reescribir(self, titulo, descripcion):
-        """
-        Intenta reescribir con DeepSeek; si falla, prueba con Groq;
-        si ambos fallan, devuelve el texto original sin traducir.
-        """
         resultado = self._llamar_deepseek(titulo, descripcion)
         if resultado:
             print("   🧠 Reescrito con DeepSeek")
@@ -274,9 +264,9 @@ class IARedactor:
         return titulo_recortado, descripcion
 
 # ============================================
-# EXTRACCIÓN DE IMAGEN (RESPALDO)
+# EXTRACCIÓN DE IMAGEN DESDE RSS (RESPALDO)
 # ============================================
-def extraer_imagen(entry):
+def extraer_imagen_desde_rss(entry):
     if 'media_thumbnail' in entry and entry.media_thumbnail:
         return entry.media_thumbnail[0]['url']
     if 'media_content' in entry and entry.media_content:
@@ -292,17 +282,12 @@ def extraer_imagen(entry):
         img_match = re.search(r'<img[^>]+src="([^">]+)"', content)
         if img_match:
             return img_match[1]
-    return "https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEjHDh8uCDe6OcMJuYQ48ZoDxLDetLv4bCgAesT2hZZrbTlsSVM-vSy-OlGjDnV5W9AE1Y8dapE-ANqUfwyDO2qzqpZRdFQxcAGsOwnYUslcyDuVKI4_zvyi01pgwaQHVqauXTnccYtxd0XLCbq8asfwWCQeXWfrzCJ0xhPiNfSR7zqFbWzy28kxGA"
+    return None
 
 # ============================================
-# FORMATEAR CONTENIDO DEL BORRADOR (CON TEXTO COMPLETO)
+# FORMATEAR CONTENIDO DEL BORRADOR
 # ============================================
 def formatear_contenido_borrador(texto_completo, imagen, enlace, fuente, titulo_original):
-    """
-    Crea el contenido HTML del borrador con el texto completo extraído.
-    El Bot 2 se encargará de darle formato y estilo.
-    """
-    # Limpiar texto HTML
     texto_limpio = re.sub(r'<[^>]+>', ' ', texto_completo)
     texto_limpio = re.sub(r'\s+', ' ', texto_limpio).strip()
     
@@ -334,19 +319,17 @@ def main():
     print("="*60)
 
     if MODO_PRUEBA:
-        print("🧪 MODO_PRUEBA activo: no se van a crear borradores reales ni gastar cuota de IA innecesariamente")
+        print("🧪 MODO_PRUEBA activo")
 
-    # Verificar Blog ID
     if not BLOGGER_BLOG_ID:
         print("❌ Error: BLOGGER_BLOG_ID no está configurado")
         return
     print(f"✅ Blog ID: {BLOGGER_BLOG_ID}")
 
-    # Verificar credenciales OAuth (solo si no estamos en modo prueba)
     service = None
     if not MODO_PRUEBA:
         if not BLOGGER_REFRESH_TOKEN or not BLOGGER_CLIENT_ID or not BLOGGER_CLIENT_SECRET:
-            print("❌ Error: faltan BLOGGER_REFRESH_TOKEN, BLOGGER_CLIENT_ID o BLOGGER_CLIENT_SECRET")
+            print("❌ Error: faltan credenciales OAuth")
             return
         try:
             service = autenticar_blogger()
@@ -354,9 +337,6 @@ def main():
         except Exception as e:
             print(f"❌ Error de autenticación: {e}")
             return
-
-    if not DEEPSEEK_API_KEY and not GROQ_API_KEY:
-        print("⚠️ Advertencia: no hay DEEPSEEK_API_KEY ni GROQ_API_KEY configuradas, no se reescribirá con IA")
 
     ia = IARedactor()
     procesados = cargar_procesados()
@@ -374,48 +354,58 @@ def main():
                 enlace = entry.link
 
                 if enlace in procesados:
-                    print(f"   ⏭️  Ya procesada, se omite: {entry.title[:50]}...")
+                    print(f"   ⏭️  Ya procesada: {entry.title[:50]}...")
                     continue
 
-                try:
-                    print(f"\n   📝 Procesando: {entry.title[:60]}...")
+                # ---- FILTRO: SALTAR RESEÑAS Y FEATURES ----
+                etiquetas = entry.get('tags', [])
+                es_resena = any(tag.get('term', '').lower() in ['review', 'feature', 'interview', 'column'] for tag in etiquetas)
+                if es_resena:
+                    print(f"   ⏭️  Saltando reseña/feature: {entry.title[:50]}...")
+                    continue
 
-                    # ---- 1. EXTRAER CONTENIDO COMPLETO ----
+                print(f"\n   📝 Procesando: {entry.title[:60]}...")
+
+                try:
+                    # ---- EXTRAER CONTENIDO COMPLETO ----
                     texto_completo, imagen_completa = extraer_contenido_completo(enlace)
 
                     if texto_completo:
                         print(f"   ✅ Texto completo extraído: {len(texto_completo)} caracteres")
-                        descripcion_para_ia = texto_completo[:800]  # Para el resumen de IA
+                        descripcion_para_ia = texto_completo[:800]
                     else:
                         print(f"   ⚠️ No se pudo extraer texto completo, usando summary del RSS")
                         descripcion_original = entry.description if 'description' in entry else ""
                         texto_completo = descripcion_original
                         descripcion_para_ia = descripcion_original[:800]
 
-                    # ---- 2. REESCRIBIR TÍTULO Y DESCRIPCIÓN CON IA ----
-                    titulo_final, descripcion_resumen = ia.reescribir(entry.title, descripcion_para_ia)
+                    # ---- REESCRIBIR TÍTULO ----
+                    titulo_final, _ = ia.reescribir(entry.title, descripcion_para_ia)
 
-                    # ---- 3. EXTRAER IMAGEN ----
+                    # ---- EXTRAER IMAGEN ----
                     if imagen_completa:
                         imagen = imagen_completa
                         print(f"   ✅ Imagen extraída de la página")
                     else:
-                        imagen = extraer_imagen(entry)
-                        print(f"   ℹ️ Usando imagen del RSS")
+                        imagen = extraer_imagen_desde_rss(entry)
+                        if imagen:
+                            print(f"   ℹ️ Imagen extraída del RSS")
+                        else:
+                            imagen = "https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEjHDh8uCDe6OcMJuYQ48ZoDxLDetLv4bCgAesT2hZZrbTlsSVM-vSy-OlGjDnV5W9AE1Y8dapE-ANqUfwyDO2qzqpZRdFQxcAGsOwnYUslcyDuVKI4_zvyi01pgwaQHVqauXTnccYtxd0XLCbq8asfwWCQeXWfrzCJ0xhPiNfSR7zqFbWzy28kxGA"
+                            print(f"   ℹ️ Usando imagen por defecto")
 
-                    # ---- 4. FORMATEAR CONTENIDO DEL BORRADOR ----
-                    # El borrador guarda el texto completo, no el resumen de IA
+                    # ---- FORMATEAR CONTENIDO ----
                     contenido = formatear_contenido_borrador(
                         texto_completo,
                         imagen,
                         enlace,
                         config_fuente,
-                        titulo_final  # Usar el título editado por IA
+                        titulo_final
                     )
 
-                    # ---- 5. CREAR BORRADOR ----
+                    # ---- CREAR BORRADOR ----
                     if MODO_PRUEBA:
-                        print(f"   🧪 [SIMULADO] Se crearía borrador: {titulo_final[:60]}")
+                        print(f"   🧪 [SIMULADO] Borrador: {titulo_final[:60]}")
                     else:
                         post = {
                             'title': titulo_final,
@@ -441,7 +431,7 @@ def main():
 
     print("\n" + "="*60)
     if MODO_PRUEBA:
-        print(f"🧪 Proceso de PRUEBA completado. {total_nuevas} noticias nuevas detectadas (no se publicó nada).")
+        print(f"🧪 Prueba completada. {total_nuevas} noticias nuevas detectadas.")
     else:
         print(f"✅ Proceso completado. {total_nuevas} borradores nuevos creados.")
     print("="*60)
