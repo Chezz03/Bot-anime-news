@@ -1,35 +1,41 @@
-name: Bot Anime News
+name: Ejecutar Bot Recolector (Bot 1)
 
 on:
   schedule:
-    - cron: '0 9,15,21 * * *'
-  workflow_dispatch:
+    - cron: '0 */6 * * *'  # Cada 6 horas
+  workflow_dispatch:        # Permite ejecución manual
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-    
+
     steps:
-      - name: Clonar repositorio
+      - name: 📥 Clonar repositorio
         uses: actions/checkout@v4
-      
-      - name: Configurar Python
-        uses: actions/setup-python@v5
+
+      - name: 🐍 Configurar Python 3.9
+        uses: actions/setup-python@v4
         with:
-          python-version: '3.10'
-      
-      - name: Instalar dependencias
+          python-version: '3.9'
+
+      - name: 📦 Instalar dependencias
         run: pip install -r requirements.txt
-      
-      - name: Crear credentials.json
-        run: echo '${{ secrets.CREDENTIALS_JSON }}' > credentials.json
-        
-      - name: Crear token.json
-        run: echo '${{ secrets.TOKEN_JSON }}' > token.json
-        
-      - name: Ejecutar bot
+
+      - name: 🔐 Crear archivo credentials.json desde Secret
+        env:
+          CREDENTIALS_JSON: ${{ secrets.CREDENTIALS_JSON }}
+        run: echo "$CREDENTIALS_JSON" > credentials.json
+
+      - name: 🤖 Ejecutar Bot 1 (Recolector)
         env:
           BLOGGER_BLOG_ID: ${{ secrets.BLOGGER_BLOG_ID }}
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}  # 🔥 LINEA AGREGADA
-        run: |
-          python bot_anime.py
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: python bot_anime.py
+
+      - name: 💾 Guardar archivo de procesados (opcional)
+        uses: actions/upload-artifact@v4
+        with:
+          name: procesados
+          path: procesados.json
+          retention-days: 30
