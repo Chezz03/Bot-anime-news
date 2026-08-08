@@ -1,7 +1,6 @@
-feedparser
-requests
-beautifulsoup4
-markdown
-google-api-python-client
-google-auth-httplib2
-google-auth-oauthlib
+feedparser==6.0.10
+requests==2.31.0
+markdown==3.5.1
+google-auth==2.29.0
+google-auth-oauthlib==1.1.0
+google-api-python-client==2.126.0
