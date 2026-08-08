@@ -515,7 +515,7 @@ def formatear_contenido(texto_markdown, imagen, enlace, fuente):
 <hr style="border-color:#f43dce;border-width:1px;margin:20px 0;">
 <p style="text-align:center;font-size:0.9rem;">
 <a href="{enlace}" target="_blank" rel="noopener noreferrer" style="color:#f43dce;text-decoration:none;font-weight:bold;">
-📌 Fuente: Anime Actualidad Argentina - Te enteraste primero aquí
+📌 Fuente
 </a>
 </p>
 <p style="text-align:center;font-size:0.8rem;color:#9a9a9a;">
