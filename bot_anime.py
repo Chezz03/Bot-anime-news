@@ -396,7 +396,7 @@ def formatear_contenido(texto_markdown, imagen, enlace, fuente):
 </a>
 </p>
 <p style="text-align:center;font-size:0.8rem;color:#9a9a9a;">
-Publicado automáticamente por Bot de Anime Actualidad Argentina
+Publicado por Anime Actualidad Argentina
 </p>
 """
 
