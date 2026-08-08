@@ -6,7 +6,7 @@ import os
 import markdown
 from datetime import datetime
 import time
-from bs4 import BeautifulSoup  # NUEVA IMPORTACIÓN
+from bs4 import BeautifulSoup
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from google.auth.transport.requests import Request
@@ -211,18 +211,14 @@ def scrapear_articulo_ann(url):
             titulo = ""
 
         # ---- CONTENIDO PRINCIPAL ----
-        # Buscar el div que contiene el cuerpo del artículo
         contenido_div = soup.find('div', class_='body')
         if not contenido_div:
-            # Fallback: buscar cualquier div con contenido
             contenido_div = soup.find('div', itemprop='articleBody')
 
         contenido = ""
         if contenido_div:
-            # Extraer todos los párrafos y listas
             for elemento in contenido_div.find_all(['p', 'ul', 'ol', 'blockquote']):
                 if elemento.name in ['ul', 'ol']:
-                    # Procesar listas
                     items = [li.get_text(strip=True) for li in elemento.find_all('li')]
                     if items:
                         contenido += '\n' + '\n'.join(['- ' + item for item in items]) + '\n'
@@ -231,7 +227,6 @@ def scrapear_articulo_ann(url):
                     if texto:
                         contenido += texto + '\n\n'
         else:
-            # Si no encuentra el cuerpo, buscar en el div principal
             contenido_div = soup.find('div', class_='news-content')
             if contenido_div:
                 for p in contenido_div.find_all('p'):
@@ -261,18 +256,15 @@ def scrapear_articulo_ann(url):
         if img_tag:
             imagen = img_tag.get('content', '')
 
-        # ---- EXTRAER NOMBRES DE ANIMES (patrón común en ANN) ----
+        # ---- EXTRAER NOMBRES DE ANIMES ----
         animes_mencionados = []
-        # Buscar en el contenido enlaces a animes (suelen tener clase 'article-link')
         for link in soup.find_all('a', class_='article-link'):
             texto = link.get_text(strip=True)
-            if texto and len(texto) < 100:  # Evitar títulos de artículos largos
+            if texto and len(texto) < 100:
                 animes_mencionados.append(texto)
-
-        # Limpiar duplicados
         animes_mencionados = list(set(animes_mencionados))
 
-        # ---- DETECTAR STAFF (nombres con roles) ----
+        # ---- DETECTAR STAFF ----
         staff_roles = {}
         patrones_staff = {
             r'directed by ([^,]+)': 'Director',
@@ -297,9 +289,9 @@ def scrapear_articulo_ann(url):
             'autor': autor,
             'fecha': fecha,
             'imagen': imagen,
-            'animes_mencionados': animes_mencionados[:10],  # Máximo 10
+            'animes_mencionados': animes_mencionados[:10],
             'staff': staff_roles,
-            'cifras': cifras[:5]  # Máximo 5 cifras
+            'cifras': cifras[:5]
         }
     except Exception as e:
         print(f"   ⚠️ Error scrapeando artículo: {e}")
@@ -349,7 +341,6 @@ def reescribir_con_groq(titulo, descripcion, fuente_nombre, sinopsis_data=None, 
         print("   ⚠️ GROQ_API_KEY no configurada. Usando traducción simple.")
         return None
 
-    # ---- CONSTRUIR MENSAJE PARA LA IA ----
     user_prompt = f"""Fuente: {fuente_nombre}
 Título original: {titulo}
 Descripción original: {descripcion}
@@ -506,7 +497,7 @@ def extraer_imagen(entry):
     return IMAGEN_DEFECTO
 
 # ============================================
-# FORMATO DEL POST CON MARKDOWN
+# FORMATO DEL POST CON MARKDOWN (ACTUALIZADO)
 # ============================================
 def formatear_contenido(texto_markdown, imagen, enlace, fuente):
     texto_html = convertir_markdown_a_html(texto_markdown)
@@ -516,7 +507,7 @@ def formatear_contenido(texto_markdown, imagen, enlace, fuente):
 <img src="{imagen}" alt="Anime" style="max-width:100%;border-radius:10px;"/>
 </div>
 <p><strong>📅 Fecha:</strong> {datetime.now().strftime('%d/%m/%Y')}</p>
-<p><strong>📰 Fuente:</strong> <a href="{enlace}" target="_blank" rel="noopener noreferrer">{fuente['categoria']}</a></p>
+<p><strong>📰 Fuente Original:</strong> <a href="{enlace}" target="_blank" rel="noopener noreferrer">{fuente['categoria']}</a></p>
 <hr style="border-color:#f43dce;border-width:1px;margin:20px 0;">
 <div style="font-size:1.1rem;line-height:1.8;">
 {texto_html}
@@ -524,11 +515,11 @@ def formatear_contenido(texto_markdown, imagen, enlace, fuente):
 <hr style="border-color:#f43dce;border-width:1px;margin:20px 0;">
 <p style="text-align:center;font-size:0.9rem;">
 <a href="{enlace}" target="_blank" rel="noopener noreferrer" style="color:#f43dce;text-decoration:none;font-weight:bold;">
-🔗 Leer noticia completa →
+📌 Fuente: Anime Actualidad Argentina - Te enteraste primero aquí
 </a>
 </p>
 <p style="text-align:center;font-size:0.8rem;color:#9a9a9a;">
-Publicado automáticamente por Bot de Anime Actualidad Argentina
+Anime Actualidad Argentina - Te enteraste primero aquí
 </p>
 """
 
@@ -583,14 +574,13 @@ def main():
                         if sinopsis_data:
                             print(f"   ✅ Sinopsis obtenida para: {sinopsis_data['titulo']}")
 
-                    # ---- INTENTAR SCRAPEAR EL ARTÍCULO COMPLETO ----
+                    # ---- SCRAPEAR ARTÍCULO COMPLETO ----
                     articulo_completo = None
                     if 'animenewsnetwork' in nombre_fuente and hasattr(entry, 'link'):
                         print(f"   🔍 Intentando scrapear artículo completo...")
                         articulo_completo = scrapear_articulo_ann(entry.link)
                         if articulo_completo:
                             print(f"   ✅ Artículo scrapeado: {len(articulo_completo['contenido'])} caracteres")
-                            # Si encontramos animes mencionados, actualizar sinopsis_data
                             if articulo_completo['animes_mencionados'] and not sinopsis_data:
                                 for anime_candidato in articulo_completo['animes_mencionados']:
                                     sinopsis_temp = buscar_sinopsis_anilist(anime_candidato)
@@ -599,7 +589,7 @@ def main():
                                         print(f"   ✅ Sinopsis obtenida para: {sinopsis_data['titulo']}")
                                         break
 
-                    # ---- REESCRITURA CON GROQ (usando el contenido completo) ----
+                    # ---- REESCRITURA CON GROQ ----
                     texto_para_ia = articulo_completo['contenido'] if articulo_completo else descripcion[:2000]
 
                     texto_markdown = reescribir_con_groq(
@@ -622,7 +612,6 @@ def main():
 
                     # ---- EXTRAER IMAGEN ----
                     imagen = extraer_imagen(entry)
-                    # Si tenemos imagen del scraping, usarla
                     if articulo_completo and articulo_completo.get('imagen'):
                         imagen = articulo_completo['imagen']
 
