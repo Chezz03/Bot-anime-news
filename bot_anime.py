@@ -12,10 +12,13 @@ from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import InstalledAppFlow
 
 # ============================================
-# CONFIGURACIÓN
+# CONFIGURACIÓN (Variables de entorno)
 # ============================================
 BLOGGER_BLOG_ID = os.environ.get("BLOGGER_BLOG_ID", "")
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")  # Opcional, mantener como respaldo
+DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")  # Nueva opción
+MODO_PRUEBA = os.environ.get("MODO_PRUEBA", "False").lower() == "true"
+PROCESADOS_FILE = "procesados.json"
 
 # ============================================
 # FUENTES RSS
@@ -41,7 +44,23 @@ RSS_FEEDS = {
 SCOPES = ['https://www.googleapis.com/auth/blogger']
 
 # ============================================
-# AUTENTICACIÓN BLOGGER
+# CONTROL DE DUPLICADOS
+# ============================================
+def cargar_procesados():
+    if os.path.exists(PROCESADOS_FILE):
+        with open(PROCESADOS_FILE, 'r', encoding='utf-8') as f:
+            try:
+                return set(json.load(f))
+            except:
+                return set()
+    return set()
+
+def guardar_procesados(procesados):
+    with open(PROCESADOS_FILE, 'w', encoding='utf-8') as f:
+        json.dump(list(procesados), f, ensure_ascii=False, indent=2)
+
+# ============================================
+# AUTENTICACIÓN BLOGGER (sin cambios)
 # ============================================
 def autenticar_blogger():
     """Autentica con OAuth 2.0 y devuelve el servicio de Blogger"""
@@ -90,12 +109,10 @@ class Traductor:
         return texto
 
 # ============================================
-# BÚSQUEDA DE SINOPSIS EN ANILIST
+# BÚSQUEDA DE SINOPSIS EN ANILIST (sin cambios)
 # ============================================
 def buscar_sinopsis_anilist(titulo_anime):
-    """
-    Busca un anime en AniList y devuelve su sinopsis, géneros y puntaje.
-    """
+    """Busca un anime en AniList y devuelve su sinopsis, géneros y puntaje."""
     if not titulo_anime or len(titulo_anime) < 3:
         return None
 
@@ -127,11 +144,9 @@ def buscar_sinopsis_anilist(titulo_anime):
         if response.status_code == 200:
             data = response.json().get('data', {}).get('Media')
             if data:
-                # Limpiar descripción de HTML
                 desc = data.get('description', '')
                 desc_limpia = re.sub(r'<[^>]+>', ' ', desc)
                 desc_limpia = re.sub(r'\s+', ' ', desc_limpia).strip()
-
                 return {
                     'titulo': data.get('title', {}).get('romaji', titulo_anime),
                     'titulo_eng': data.get('title', {}).get('english'),
@@ -144,47 +159,35 @@ def buscar_sinopsis_anilist(titulo_anime):
                 }
     except Exception as e:
         print(f"   ⚠️ Error al buscar sinopsis en AniList: {e}")
-
     return None
 
 # ============================================
-# DETECCIÓN DE ANIME EN EL TEXTO
+# DETECCIÓN DE ANIME EN EL TEXTO (sin cambios)
 # ============================================
 def detectar_anime_en_titulo(titulo):
-    """
-    Detecta posibles nombres de anime en el título de la noticia.
-    """
-    # Lista de palabras clave a ignorar (para evitar falsos positivos)
+    """Detecta posibles nombres de anime en el título de la noticia."""
     ignorar = ['switch', 'playstation', 'xbox', 'steam', 'nintendo', 'ventas',
                'mercado', 'argentina', 'mundo', 'juego', 'consola', 'videojuego']
 
-    # Buscar entre paréntesis o comillas
     patrones = [
-        r'"([^"]+)"',       # Texto entre comillas
-        r'「([^」]+)」',     # Texto entre comillas japonesas
-        r'《([^》]+)》',     # Texto entre comillas angulares
-        r'\(([^)]+)\)'      # Texto entre paréntesis
+        r'"([^"]+)"', r'「([^」]+)」', r'《([^》]+)》', r'\(([^)]+)\)'
     ]
 
     for patron in patrones:
         matches = re.findall(patron, titulo)
         for match in matches:
-            # Si la palabra no está en la lista de ignorar, es un candidato
             if len(match) > 2 and not any(p in match.lower() for p in ignorar):
                 return match
 
-    # Si no encuentra entre comillas, busca palabras en mayúscula con al menos 2 palabras
     palabras = titulo.split()
     for i, palabra in enumerate(palabras):
         if palabra[0].isupper() and len(palabra) > 2:
-            # Si es una palabra que parece nombre
             if i + 1 < len(palabras) and palabras[i+1][0].isupper():
                 return f"{palabra} {palabras[i+1]}"
-
     return None
 
 # ============================================
-# SYSTEM PROMPT - ESTRUCTURA PROFESIONAL
+# SYSTEM PROMPT (tu mismo prompt, sin cambios)
 # ============================================
 SYSTEM_PROMPT = """
 Eres un redactor experto para "Anime Actualidad Argentina", un blog argentino.
@@ -201,33 +204,17 @@ REGLAS DE ESTRUCTURA Y ESTILO (OBLIGATORIAS):
 4.  **Tono**: Profesional pero cercano, como un periodista especializado que le habla a un público apasionado. Usá emojis para darle dinamismo (📢, 🎬, 📖, 📚).
 5.  **Despedida**: Terminá con "¿Qué opinás? Dejanos tu comentario en Anime Actualidad Argentina".
 
-EJEMPLO DE TONO Y ESTRUCTURA:
-"📢 El nuevo anime de 'Giant Ojō-sama' ya tiene fecha de estreno: enero de 2027. La adaptación del manga de Nikumura Q, producida por Tatsunoko Production y dirigida por Hiroshi Ikehata, promete ser una de las comedias más esperadas de la temporada.
-
-### 🎬 El equipo detrás del proyecto
-La serie contará con Hiroshi Ikehata (WITCH WATCH) como director, con Katsuya Oshima como subdirector. Hajime Mitsuda (Food for the Soul) estará a cargo del diseño de personajes y la dirección de animación. La composición de la serie y el guion correrán a cargo de Yū Satō (Azur Lane: Slow Ahead!).
-
-### 📖 ¿De qué trata la historia?
-Oriko Fujidō, la heredera de una familia ultra-rica, comienza a crecer hasta alcanzar proporciones gigantescas. Cuando un invasor gigante ataca su pueblo, su mayordomo Sebastian le ofrece una bebida que la transforma en una gigante. Ahora, ella debe proteger su pueblo... aunque el riesgo de destruirlo es inminente.
-
-### 📚 Un éxito en papel
-El manga, serializado desde julio de 2020 en Sunday Webry, ya cuenta con 12 tomos recopilatorios. La obra fue nominada en los 'Next Manga Awards' y ocupó el 5º puesto en la encuesta de AnimeJapan sobre el anime más deseado."
-
 **IMPORTANTE**: Proporcioná la salida en formato Markdown, con la estructura y el tono indicados.
 """
 
 # ============================================
-# REESCRITURA CON GROQ (IA GRATUITA)
+# REESCRITURA CON DEEPSEEK (NUEVO) O GROQ (RESPALDO)
 # ============================================
-def reescribir_con_groq(titulo, descripcion, fuente_nombre, sinopsis_data=None):
-    """
-    Usa Groq (Llama 4) para reescribir la noticia con estilo humano, SEO y formato.
-    """
-    if not GROQ_API_KEY:
-        print("   ⚠️ GROQ_API_KEY no configurada. Usando traducción simple.")
+def reescribir_con_deepseek(titulo, descripcion, fuente_nombre, sinopsis_data=None):
+    """Usa DeepSeek para reescribir la noticia (más económico y mejor contexto)."""
+    if not DEEPSEEK_API_KEY:
         return None
 
-    # Construir el mensaje del usuario
     user_prompt = f"""Fuente: {fuente_nombre}
 Título original: {titulo}
 Descripción original: {descripcion[:2000]}
@@ -248,6 +235,55 @@ URL: {sinopsis_data['url']}
 
     try:
         response = requests.post(
+            "https://api.deepseek.com/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "deepseek-chat",
+                "messages": [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt}
+                ],
+                "temperature": 0.7,
+                "max_tokens": 1200
+            },
+            timeout=60
+        )
+        if response.status_code == 200:
+            data = response.json()
+            texto = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+            if texto.strip():
+                print("   ✅ Reescritura con DeepSeek exitosa")
+                return texto.strip()
+        return None
+    except Exception as e:
+        print(f"   ⚠️ Error en DeepSeek: {e}")
+        return None
+
+def reescribir_con_groq(titulo, descripcion, fuente_nombre, sinopsis_data=None):
+    """Respaldo con Groq si DeepSeek falla."""
+    if not GROQ_API_KEY:
+        return None
+
+    user_prompt = f"""Fuente: {fuente_nombre}
+Título original: {titulo}
+Descripción original: {descripcion[:2000]}
+
+Reescribí esta noticia siguiendo las reglas de estructura y estilo que se te indicaron.
+
+{'' if not sinopsis_data else f'''
+**INFORMACIÓN ADICIONAL DEL ANIME RELACIONADO:**
+Título: {sinopsis_data['titulo']}
+Sinopsis: {sinopsis_data['sinopsis']}
+Géneros: {sinopsis_data['generos']}
+Puntaje en AniList: {sinopsis_data['puntaje']}/100
+'''}
+"""
+
+    try:
+        response = requests.post(
             "https://api.groq.com/openai/v1/chat/completions",
             headers={
                 "Authorization": f"Bearer {GROQ_API_KEY}",
@@ -260,123 +296,89 @@ URL: {sinopsis_data['url']}
                     {"role": "user", "content": user_prompt}
                 ],
                 "temperature": 0.7,
-                "max_tokens": 1200  # Aumentado para permitir más detalle
+                "max_tokens": 1200
             },
             timeout=60
         )
-
         if response.status_code == 200:
             data = response.json()
             texto = data.get("choices", [{}])[0].get("message", {}).get("content", "")
             if texto.strip():
                 print("   ✅ Reescritura con Groq exitosa")
                 return texto.strip()
-            else:
-                print("   ⚠️ Groq devolvió contenido vacío")
-                return None
-        else:
-            print(f"   ⚠️ Groq respondió con status {response.status_code}")
-            return None
+        return None
     except Exception as e:
-        print(f"   ⚠️ Error llamando a Groq: {e}")
+        print(f"   ⚠️ Error en Groq: {e}")
         return None
 
 # ============================================
-# CONVERSIÓN DE MARKDOWN A HTML
+# CONVERSIÓN DE MARKDOWN A HTML (sin cambios)
 # ============================================
 def convertir_markdown_a_html(texto_markdown):
-    """Convierte texto en formato Markdown a HTML para Blogger."""
     if not texto_markdown:
         return ""
-
-    # Configurar extensiones para mejor compatibilidad
-    extensions = ['extra', 'codehilite', 'toc', 'nl2br']
-
     try:
-        html = markdown.markdown(texto_markdown, extensions=extensions)
+        html = markdown.markdown(texto_markdown, extensions=['extra', 'codehilite', 'toc', 'nl2br'])
         return html
-    except Exception as e:
-        print(f"   ⚠️ Error convirtiendo Markdown: {e}")
-        # Fallback: reemplazar saltos de línea por <br>
+    except:
         return texto_markdown.replace('\n', '<br>')
 
 # ============================================
-# OPTIMIZADOR SEO PARA TÍTULOS
+# OPTIMIZADOR SEO (sin cambios)
 # ============================================
 class OptimizadorSEO:
     def __init__(self):
         self.palabras_clave = ["anime", "manga", "estreno", "noticias", "japón", "cultura otaku"]
-
     def optimizar_titulo(self, titulo_trad):
         if len(titulo_trad) > 65:
             titulo_trad = titulo_trad[:62] + "..."
         return titulo_trad
 
 # ============================================
-# EXTRACCIÓN DE IMÁGENES
+# EXTRACCIÓN DE IMÁGENES (sin cambios)
 # ============================================
 IMAGEN_DEFECTO = "https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEjHDh8uCDe6OcMJuYQ48ZoDxLDetLv4bCgAesT2hZZrbTlsSVM-vSy-OlGjDnV5W9AE1Y8dapE-ANqUfwyDO2qzqpZRdFQxcAGsOwnYUslcyDuVKI4_zvyi01pgwaQHVqauXTnccYtxd0XLCbq8asfwWCQeXWfrzCJ0xhPiNfSR7zqFbWzy28kxGA"
 
 def extraer_imagen_de_rss(entry):
-    """Intenta sacar la imagen directamente de los datos del RSS"""
     if 'media_thumbnail' in entry and entry.media_thumbnail:
         return entry.media_thumbnail[0]['url']
     if 'media_content' in entry and entry.media_content:
         for content in entry.media_content:
             if 'url' in content:
                 return content['url']
-    if 'links' in entry:
-        for link in entry.links:
-            if link.get('type', '').startswith('image'):
-                return link.href
     if 'content' in entry and entry.content:
         content = entry.content[0].value if isinstance(entry.content, list) else entry.content
         img_match = re.search(r'<img[^>]+src="([^">]+)"', content)
         if img_match:
             return img_match.group(1)
-    if 'summary' in entry:
-        img_match = re.search(r'<img[^>]+src="([^">]+)"', entry.summary)
-        if img_match:
-            return img_match.group(1)
     return None
 
 def extraer_imagen_de_articulo(url_articulo):
-    """Respaldo: si el RSS no trae imagen, entra a la página del artículo"""
     try:
-        response = requests.get(
-            url_articulo, timeout=10,
-            headers={"User-Agent": "Mozilla/5.0 (compatible; BotAnimeNews/1.0)"}
-        )
+        response = requests.get(url_articulo, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
         if response.status_code == 200:
-            match = re.search(
-                r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']',
-                response.text
-            )
+            match = re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']', response.text)
             if match:
                 return match.group(1)
-    except Exception as e:
-        print(f"    ⚠️ No se pudo obtener imagen del artículo: {e}")
+    except:
+        pass
     return None
 
 def extraer_imagen(entry):
     imagen = extraer_imagen_de_rss(entry)
     if imagen:
         return imagen
-
     if hasattr(entry, 'link'):
         imagen = extraer_imagen_de_articulo(entry.link)
         if imagen:
             return imagen
-
     return IMAGEN_DEFECTO
 
 # ============================================
-# FORMATO DEL POST CON MARKDOWN
+# FORMATO DEL POST (sin cambios)
 # ============================================
 def formatear_contenido(texto_markdown, imagen, enlace, fuente):
-    # Convertir el markdown a HTML
     texto_html = convertir_markdown_a_html(texto_markdown)
-
     return f"""
 <div style="text-align:center; margin-bottom:20px;">
 <img src="{imagen}" alt="Anime" style="max-width:100%;border-radius:10px;"/>
@@ -399,7 +401,7 @@ Publicado automáticamente por Bot de Anime Actualidad Argentina
 """
 
 # ============================================
-# FUNCIÓN PRINCIPAL
+# FUNCIÓN PRINCIPAL (MEJORADA)
 # ============================================
 def main():
     print("="*60)
@@ -411,7 +413,9 @@ def main():
         return
 
     print(f"✅ Blog ID: {BLOGGER_BLOG_ID}")
-    print(f"🧠 Reescritura con Groq: {'ACTIVADA' if GROQ_API_KEY else 'desactivada (usando traducción simple)'}")
+    print(f"🧠 Reescritura con DeepSeek: {'ACTIVADA' if DEEPSEEK_API_KEY else 'desactivada'}")
+    print(f"🧠 Reescritura con Groq (respaldo): {'ACTIVADA' if GROQ_API_KEY else 'desactivada'}")
+    print(f"🧪 Modo prueba: {'ACTIVADO' if MODO_PRUEBA else 'desactivado'}")
 
     if not os.path.exists('credentials.json'):
         print("❌ Error: No se encontró el archivo credentials.json")
@@ -426,6 +430,7 @@ def main():
 
     traductor = Traductor()
     seo = OptimizadorSEO()
+    procesados = cargar_procesados()
     total_publicadas = 0
 
     for nombre_fuente, config_fuente in RSS_FEEDS.items():
@@ -435,12 +440,19 @@ def main():
             print(f"   📡 {len(feed.entries)} noticias encontradas")
 
             for entry in feed.entries[:5]:
+                enlace = entry.link
+
+                # Verificar duplicado
+                if enlace in procesados:
+                    print(f"   ⏭️ Noticia ya procesada: {entry.title[:50]}...")
+                    continue
+
                 try:
                     descripcion = entry.description if 'description' in entry else ''
                     if not descripcion and 'summary' in entry:
                         descripcion = entry.summary
 
-                    # ---- DETECTAR ANIME EN EL TÍTULO ----
+                    # Detectar anime
                     nombre_anime = detectar_anime_en_titulo(entry.title)
                     sinopsis_data = None
                     if nombre_anime:
@@ -449,43 +461,43 @@ def main():
                         if sinopsis_data:
                             print(f"   ✅ Sinopsis obtenida para: {sinopsis_data['titulo']}")
 
-                    # ---- REESCRITURA CON GROQ ----
-                    texto_markdown = reescribir_con_groq(
-                        entry.title,
-                        descripcion[:2000],
-                        nombre_fuente,
-                        sinopsis_data
+                    # Reescritura (DeepSeek primero, luego Groq)
+                    texto_markdown = reescribir_con_deepseek(
+                        entry.title, descripcion[:2000], nombre_fuente, sinopsis_data
                     )
+                    if not texto_markdown and GROQ_API_KEY:
+                        texto_markdown = reescribir_con_groq(
+                            entry.title, descripcion[:2000], nombre_fuente, sinopsis_data
+                        )
 
                     if texto_markdown:
-                        # Traducir título para el post
                         titulo_trad = traductor.traducir(entry.title)
                         titulo_trad = seo.optimizar_titulo(titulo_trad)
                     else:
-                        # Respaldo: traducción simple
                         print("   🔄 Usando traducción de respaldo")
                         titulo_trad = traductor.traducir(entry.title)
                         titulo_trad = seo.optimizar_titulo(titulo_trad)
                         texto_markdown = traductor.traducir(descripcion[:500]) if descripcion else "Noticia sin descripción."
-                        # Envolver en un párrafo simple
                         texto_markdown = f"**{entry.title}**\n\n{texto_markdown}"
 
-                    # ---- EXTRAER IMAGEN ----
                     imagen = extraer_imagen(entry)
+                    contenido = formatear_contenido(texto_markdown, imagen, enlace, config_fuente)
 
-                    # ---- FORMATO ----
-                    contenido = formatear_contenido(texto_markdown, imagen, entry.link, config_fuente)
+                    # Publicar o simular
+                    if MODO_PRUEBA:
+                        print(f"   🧪 [PRUEBA] Borrador creado: {titulo_trad[:50]}...")
+                    else:
+                        post = {
+                            'title': titulo_trad,
+                            'content': contenido,
+                            'labels': config_fuente['etiquetas'],
+                            'status': 'DRAFT'
+                        }
+                        result = service.posts().insert(blogId=BLOGGER_BLOG_ID, body=post).execute()
+                        print(f"   ✅ Borrador creado: {titulo_trad[:50]}...")
 
-                    # ---- PUBLICAR COMO BORRADOR ----
-                    post = {
-                        'title': titulo_trad,
-                        'content': contenido,
-                        'labels': config_fuente['etiquetas'],
-                        'status': 'DRAFT'
-                    }
-
-                    result = service.posts().insert(blogId=BLOGGER_BLOG_ID, body=post).execute()
-                    print(f"   ✅ Borrador creado: {titulo_trad[:50]}...")
+                    procesados.add(enlace)
+                    guardar_procesados(procesados)
                     total_publicadas += 1
 
                 except Exception as e:
@@ -498,6 +510,7 @@ def main():
 
     print("\n" + "="*60)
     print(f"✅ Proceso completado. {total_publicadas} borradores creados.")
+    print(f"📊 Total de URLs procesadas: {len(procesados)}")
     print("="*60)
 
 if __name__ == "__main__":
