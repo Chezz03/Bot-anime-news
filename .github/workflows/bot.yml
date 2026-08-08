@@ -1,43 +1,38 @@
 name: Ejecutar Bot Recolector (Bot 1)
-
 on:
   # Programar para que se ejecute cada 6 horas (a las 0:00, 6:00, 12:00, 18:00 UTC)
   schedule:
     - cron: '0 */6 * * *'
   # Permite ejecutarlo manualmente desde la interfaz de GitHub
   workflow_dispatch:
-
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-
     steps:
       - name: 📥 Clonar el repositorio
         uses: actions/checkout@v4
-
       - name: 🐍 Configurar Python 3.9
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
-
       - name: 📦 Instalar dependencias
         run: pip install -r requirements.txt
-
       - name: 🤖 Ejecutar Bot 1 (Recolector)
         env:
-          # Credenciales de Blogger (API Key)
+          # Credenciales de Blogger (OAuth 2.0 - necesario para crear borradores)
           BLOGGER_BLOG_ID: ${{ secrets.BLOGGER_BLOG_ID }}
-          BLOGGER_API_KEY: ${{ secrets.BLOGGER_API_KEY }}
-          
+          BLOGGER_CLIENT_ID: ${{ secrets.BLOGGER_CLIENT_ID }}
+          BLOGGER_CLIENT_SECRET: ${{ secrets.BLOGGER_CLIENT_SECRET }}
+          BLOGGER_REFRESH_TOKEN: ${{ secrets.BLOGGER_REFRESH_TOKEN }}
+
           # Claves de IA (DeepSeek y Groq como respaldo)
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          
+
           # Modo prueba (True o False)
           MODO_PRUEBA: ${{ secrets.MODO_PRUEBA }}
-          
-        run: python bot_anime.py 
 
+        run: python bot_anime.py
       - name: 💾 Guardar archivo de procesados (opcional)
         uses: actions/upload-artifact@v4
         with:
