@@ -5,6 +5,7 @@ import json
 import os
 from datetime import datetime
 import time
+from bs4 import BeautifulSoup
 
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
@@ -91,6 +92,69 @@ def autenticar_blogger():
 
     creds.refresh(Request())  # canjea el refresh token por un access token válido
     return build('blogger', 'v3', credentials=creds)
+
+# ============================================
+# EXTRACCIÓN DE CONTENIDO COMPLETO (NUEVO)
+# ============================================
+def extraer_contenido_completo(url):
+    """
+    Entra a la página del artículo y extrae:
+    - Texto completo del artículo
+    - Imagen destacada (og:image o primera imagen grande)
+    """
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        }
+        response = requests.get(url, headers=headers, timeout=15)
+        if response.status_code != 200:
+            return None, None
+
+        soup = BeautifulSoup(response.text, 'html.parser')
+
+        # ---- 1. EXTRAER IMAGEN DESTACADA ----
+        imagen = None
+        # Buscar en meta tags (og:image)
+        og_image = soup.find('meta', property='og:image')
+        if og_image and og_image.get('content'):
+            imagen = og_image['content']
+        else:
+            # Buscar la primera imagen grande del artículo
+            for img in soup.find_all('img'):
+                src = img.get('src') or img.get('data-src')
+                if src and ('jpg' in src or 'png' in src or 'jpeg' in src):
+                    width = img.get('width')
+                    height = img.get('height')
+                    if (width and int(width) > 200) or (height and int(height) > 200):
+                        if not src.startswith('http'):
+                            src = 'https:' + src if src.startswith('//') else src
+                        imagen = src
+                        break
+
+        # ---- 2. EXTRAER TEXTO COMPLETO ----
+        texto = None
+        # Buscar en selectores comunes de ANN
+        contenido = soup.find('div', class_='meat')
+        if not contenido:
+            contenido = soup.find('div', id='content')
+        if not contenido:
+            contenido = soup.find('article')
+        if not contenido:
+            contenido = soup.find('body')
+
+        if contenido:
+            # Eliminar elementos no deseados
+            for tag in contenido.find_all(['script', 'style', 'noscript', 'iframe', 'ins']):
+                tag.decompose()
+            texto = contenido.get_text(separator='\n', strip=True)
+            # Limpiar exceso de espacios y saltos de línea
+            texto = re.sub(r'\n\s*\n', '\n\n', texto)
+            texto = re.sub(r'[ \t]+', ' ', texto)
+
+        return texto, imagen
+    except Exception as e:
+        print(f"   ⚠️ Error extrayendo contenido completo: {e}")
+        return None, None
 
 # ============================================
 # REESCRITURA CON IA (DeepSeek primero, Groq de respaldo)
@@ -210,7 +274,7 @@ class IARedactor:
         return titulo_recortado, descripcion
 
 # ============================================
-# EXTRACCIÓN DE NOTICIAS
+# EXTRACCIÓN DE IMAGEN (RESPALDO)
 # ============================================
 def extraer_imagen(entry):
     if 'media_thumbnail' in entry and entry.media_thumbnail:
@@ -230,18 +294,25 @@ def extraer_imagen(entry):
             return img_match[1]
     return "https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEjHDh8uCDe6OcMJuYQ48ZoDxLDetLv4bCgAesT2hZZrbTlsSVM-vSy-OlGjDnV5W9AE1Y8dapE-ANqUfwyDO2qzqpZRdFQxcAGsOwnYUslcyDuVKI4_zvyi01pgwaQHVqauXTnccYtxd0XLCbq8asfwWCQeXWfrzCJ0xhPiNfSR7zqFbWzy28kxGA"
 
-def formatear_contenido(texto, imagen, enlace, fuente):
-    texto_limpio = re.sub(r'<[^>]+>', ' ', texto)
+# ============================================
+# FORMATEAR CONTENIDO DEL BORRADOR (CON TEXTO COMPLETO)
+# ============================================
+def formatear_contenido_borrador(texto_completo, imagen, enlace, fuente, titulo_original):
+    """
+    Crea el contenido HTML del borrador con el texto completo extraído.
+    El Bot 2 se encargará de darle formato y estilo.
+    """
+    # Limpiar texto HTML
+    texto_limpio = re.sub(r'<[^>]+>', ' ', texto_completo)
     texto_limpio = re.sub(r'\s+', ' ', texto_limpio).strip()
+    
     return f"""
-<div style="text-align:center; margin-bottom:20px;">
-<img src="{imagen}" alt="Anime" style="max-width:100%;border-radius:10px;"/>
-</div>
+<h1>{titulo_original}</h1>
 <p><strong>📅 Fecha:</strong> {datetime.now().strftime('%d/%m/%Y')}</p>
 <p><strong>📰 Fuente:</strong> <a href="{enlace}" target="_blank" rel="noopener noreferrer">{fuente['categoria']}</a></p>
 <hr style="border-color:#f43dce;border-width:1px;margin:20px 0;">
 <div style="font-size:1.1rem;line-height:1.8;">
-{texto_limpio}
+{texto_limpio.replace(chr(10), '<br>')}
 </div>
 <hr style="border-color:#f43dce;border-width:1px;margin:20px 0;">
 <p style="text-align:center;font-size:0.9rem;">
@@ -250,7 +321,7 @@ def formatear_contenido(texto, imagen, enlace, fuente):
 </a>
 </p>
 <p style="text-align:center;font-size:0.8rem;color:#9a9a9a;">
-Publicado automáticamente por Bot de Anime Actualidad Argentina
+<em>Borrador generado por Bot Recolector - Esperando edición del Bot Editor</em>
 </p>
 """
 
@@ -307,13 +378,42 @@ def main():
                     continue
 
                 try:
-                    descripcion_original = entry.description if 'description' in entry else ""
+                    print(f"\n   📝 Procesando: {entry.title[:60]}...")
 
-                    titulo_final, descripcion_final = ia.reescribir(entry.title, descripcion_original[:800])
+                    # ---- 1. EXTRAER CONTENIDO COMPLETO ----
+                    texto_completo, imagen_completa = extraer_contenido_completo(enlace)
 
-                    imagen = extraer_imagen(entry)
-                    contenido = formatear_contenido(descripcion_final, imagen, enlace, config_fuente)
+                    if texto_completo:
+                        print(f"   ✅ Texto completo extraído: {len(texto_completo)} caracteres")
+                        descripcion_para_ia = texto_completo[:800]  # Para el resumen de IA
+                    else:
+                        print(f"   ⚠️ No se pudo extraer texto completo, usando summary del RSS")
+                        descripcion_original = entry.description if 'description' in entry else ""
+                        texto_completo = descripcion_original
+                        descripcion_para_ia = descripcion_original[:800]
 
+                    # ---- 2. REESCRIBIR TÍTULO Y DESCRIPCIÓN CON IA ----
+                    titulo_final, descripcion_resumen = ia.reescribir(entry.title, descripcion_para_ia)
+
+                    # ---- 3. EXTRAER IMAGEN ----
+                    if imagen_completa:
+                        imagen = imagen_completa
+                        print(f"   ✅ Imagen extraída de la página")
+                    else:
+                        imagen = extraer_imagen(entry)
+                        print(f"   ℹ️ Usando imagen del RSS")
+
+                    # ---- 4. FORMATEAR CONTENIDO DEL BORRADOR ----
+                    # El borrador guarda el texto completo, no el resumen de IA
+                    contenido = formatear_contenido_borrador(
+                        texto_completo,
+                        imagen,
+                        enlace,
+                        config_fuente,
+                        titulo_final  # Usar el título editado por IA
+                    )
+
+                    # ---- 5. CREAR BORRADOR ----
                     if MODO_PRUEBA:
                         print(f"   🧪 [SIMULADO] Se crearía borrador: {titulo_final[:60]}")
                     else:
