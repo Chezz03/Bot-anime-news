@@ -6,7 +6,6 @@ import os
 import markdown
 from datetime import datetime
 import time
-from bs4 import BeautifulSoup
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from google.auth.transport.requests import Request
@@ -185,196 +184,66 @@ def detectar_anime_en_titulo(titulo):
     return None
 
 # ============================================
-# SCRAPING DEL ARTÍCULO COMPLETO DE ANN
-# ============================================
-def scrapear_articulo_ann(url):
-    """
-    Extrae el contenido completo de un artículo de Anime News Network.
-    Devuelve un diccionario con: título, contenido, imagen, autor, fecha.
-    """
-    try:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        }
-        response = requests.get(url, headers=headers, timeout=15)
-        if response.status_code != 200:
-            print(f"   ⚠️ Error al obtener el artículo: {response.status_code}")
-            return None
-
-        soup = BeautifulSoup(response.text, 'html.parser')
-
-        # ---- TÍTULO ----
-        titulo = soup.find('h1', class_='title')
-        if titulo:
-            titulo = titulo.get_text(strip=True)
-        else:
-            titulo = ""
-
-        # ---- CONTENIDO PRINCIPAL ----
-        contenido_div = soup.find('div', class_='body')
-        if not contenido_div:
-            contenido_div = soup.find('div', itemprop='articleBody')
-
-        contenido = ""
-        if contenido_div:
-            for elemento in contenido_div.find_all(['p', 'ul', 'ol', 'blockquote']):
-                if elemento.name in ['ul', 'ol']:
-                    items = [li.get_text(strip=True) for li in elemento.find_all('li')]
-                    if items:
-                        contenido += '\n' + '\n'.join(['- ' + item for item in items]) + '\n'
-                else:
-                    texto = elemento.get_text(strip=True)
-                    if texto:
-                        contenido += texto + '\n\n'
-        else:
-            contenido_div = soup.find('div', class_='news-content')
-            if contenido_div:
-                for p in contenido_div.find_all('p'):
-                    texto = p.get_text(strip=True)
-                    if texto:
-                        contenido += texto + '\n\n'
-
-        # ---- AUTOR ----
-        autor = ""
-        autor_meta = soup.find('meta', {'name': 'author'})
-        if autor_meta:
-            autor = autor_meta.get('content', '')
-        if not autor:
-            autor_tag = soup.find('span', class_='author')
-            if autor_tag:
-                autor = autor_tag.get_text(strip=True)
-
-        # ---- FECHA ----
-        fecha = ""
-        fecha_meta = soup.find('meta', {'property': 'article:published_time'})
-        if fecha_meta:
-            fecha = fecha_meta.get('content', '')
-
-        # ---- IMAGEN DESTACADA ----
-        imagen = ""
-        img_tag = soup.find('meta', {'property': 'og:image'})
-        if img_tag:
-            imagen = img_tag.get('content', '')
-
-        # ---- EXTRAER NOMBRES DE ANIMES ----
-        animes_mencionados = []
-        for link in soup.find_all('a', class_='article-link'):
-            texto = link.get_text(strip=True)
-            if texto and len(texto) < 100:
-                animes_mencionados.append(texto)
-        animes_mencionados = list(set(animes_mencionados))
-
-        # ---- DETECTAR STAFF ----
-        staff_roles = {}
-        patrones_staff = {
-            r'directed by ([^,]+)': 'Director',
-            r'written by ([^,]+)': 'Guionista',
-            r'produced by ([^,]+)': 'Productor',
-            r'animation produced by ([^,]+)': 'Estudio',
-            r'studio ([^,]+)': 'Estudio',
-            r'designed by ([^,]+)': 'Diseñador',
-        }
-
-        for patron, rol in patrones_staff.items():
-            match = re.search(patron, contenido, re.IGNORECASE)
-            if match:
-                staff_roles[rol] = match.group(1).strip()
-
-        # ---- NÚMEROS Y CIFRAS ----
-        cifras = re.findall(r'(\d+[,.]?\d*)\s*(millones|unidades|dólares|años|%|¥|yen)', contenido, re.IGNORECASE)
-
-        return {
-            'titulo': titulo,
-            'contenido': contenido,
-            'autor': autor,
-            'fecha': fecha,
-            'imagen': imagen,
-            'animes_mencionados': animes_mencionados[:10],
-            'staff': staff_roles,
-            'cifras': cifras[:5]
-        }
-    except Exception as e:
-        print(f"   ⚠️ Error scrapeando artículo: {e}")
-        return None
-
-# ============================================
-# SYSTEM PROMPT - ESTRUCTURA PROFESIONAL (MEJORADO)
+# SYSTEM PROMPT - ESTRUCTURA PROFESIONAL
 # ============================================
 SYSTEM_PROMPT = """
-Eres un redactor para "Anime Actualidad Argentina".
+Eres un redactor experto para "Anime Actualidad Argentina", un blog argentino.
+Tu tarea es reescribir noticias de anime con un estilo profesional, detallado y atractivo.
 
-**INSTRUCCIÓN PRINCIPAL:**
-Tu tarea es escribir un ARTÍCULO COMPLETO Y DETALLADO usando los datos proporcionados.
-- El artículo debe tener una introducción, desarrollo y cierre.
-- No puedes inventar información, pero sí puedes explicar y contextualizar los datos.
-- No puedes decir que falta información si está en los datos.
-- Debes usar TODOS los datos relevantes: sinopsis, fechas, nombres, editoriales, etc.
+REGLAS DE ESTRUCTURA Y ESTILO (OBLIGATORIAS):
+1.  **Título**: El título debe ser llamativo, de máximo 60 caracteres, incluyendo el nombre del anime y la palabra clave principal.
+2.  **Estructura Fija (con Subtítulos Atractivos)**: Usá la siguiente estructura, pero con títulos creativos (ej. "📢 El anuncio", "🎬 El equipo", "📖 ¿De qué trata?", "📚 Un éxito en papel").
+    *   **Introducción**: Anuncio principal, con el dato más impactante.
+    *   **Staff de Producción**: Director, estudio, diseño de personajes, guionista, etc.
+    *   **Sinopsis Oficial**: Resumen de la trama, con detalles clave.
+    *   **Origen y Reconocimientos**: Información del manga, premios, nominaciones, etc.
+3.  **Precisión y Detalle**: Incluí TODOS los datos específicos: nombres de personas, estudios, fechas, números de tomos, premios, etc.
+4.  **Tono**: Profesional pero cercano, como un periodista especializado que le habla a un público apasionado. Usá emojis para darle dinamismo (📢, 🎬, 📖, 📚).
+5.  **Despedida**: Terminá con "¿Qué opinás? Dejanos tu comentario en Anime Actualidad Argentina".
 
-**ESTRUCTURA OBLIGATORIA:**
+EJEMPLO DE TONO Y ESTRUCTURA:
+"📢 El nuevo anime de 'Giant Ojō-sama' ya tiene fecha de estreno: enero de 2027. La adaptación del manga de Nikumura Q, producida por Tatsunoko Production y dirigida por Hiroshi Ikehata, promete ser una de las comedias más esperadas de la temporada.
 
-1.  **📢 El anuncio**: Escribe un párrafo introductorio que incluya:
-    - El anuncio principal (ej. "Teki Yatsuda anuncia el final de su manga Myther").
-    - El autor del artículo y la fecha (si se proporcionan).
-    - Una breve contextualización (ej. "La noticia ha generado gran expectativa entre los fans").
-2.  **🎬 Sinopsis**: Si se proporciona una sinopsis, TRADUCELA y DESARRÓLLALA en uno o dos párrafos. No la copies textualmente, pero asegúrate de incluir todos los detalles clave de la trama.
-3.  **📖 Detalles de la publicación**: Desarrolla un párrafo con TODOS los datos sobre editorial, fechas de lanzamiento, volúmenes, etc.
-4.  **📚 Contexto adicional**: Si se mencionan otras obras del autor, desarrolla un párrafo sobre ellas. Si no, omite esta sección.
+### 🎬 El equipo detrás del proyecto
+La serie contará con Hiroshi Ikehata (WITCH WATCH) como director, con Katsuya Oshima como subdirector. Hajime Mitsuda (Food for the Soul) estará a cargo del diseño de personajes y la dirección de animación. La composición de la serie y el guion correrán a cargo de Yū Satō (Azur Lane: Slow Ahead!).
 
-**REGLAS DE ESTILO:**
-- Escribe en español, en un tono profesional pero cercano a los fans.
-- Usa Markdown para el formato (títulos, negritas, listas).
-- Termina con "¿Qué opinás? Dejanos tu comentario en Anime Actualidad Argentina".
+### 📖 ¿De qué trata la historia?
+Oriko Fujidō, la heredera de una familia ultra-rica, comienza a crecer hasta alcanzar proporciones gigantescas. Cuando un invasor gigante ataca su pueblo, su mayordomo Sebastian le ofrece una bebida que la transforma en una gigante. Ahora, ella debe proteger su pueblo... aunque el riesgo de destruirlo es inminente.
 
-**EJEMPLO DE DESARROLLO:**
-Si los datos incluyen la sinopsis "It is the near future, and the night sky over Tokyo glitters with LED light...", tu artículo debe desarrollar: "La historia de Myther se sitúa en un futuro cercano, donde el cielo de Tokio brilla con luces LED. En este contexto, una misteriosa empresa llamada Ideva ha desarrollado un dispositivo llamado Myther, que promete ayudar a las personas a convertirse en la versión perfecta de sí mismas...".
+### 📚 Un éxito en papel
+El manga, serializado desde julio de 2020 en Sunday Webry, ya cuenta con 12 tomos recopilatorios. La obra fue nominada en los 'Next Manga Awards' y ocupó el 5º puesto en la encuesta de AnimeJapan sobre el anime más deseado."
 
-**IMPORTANTE**: El artículo debe ser INFORMATIVO y COMPLETO. No te limites a una lista de datos.
+**IMPORTANTE**: Proporcioná la salida en formato Markdown, con la estructura y el tono indicados.
 """
 
 # ============================================
 # REESCRITURA CON GROQ (IA GRATUITA)
 # ============================================
-def reescribir_con_groq(titulo, descripcion, fuente_nombre, sinopsis_data=None, articulo_completo=None):
+def reescribir_con_groq(titulo, descripcion, fuente_nombre, sinopsis_data=None):
     """
-    Usa Groq para reescribir la noticia.
+    Usa Groq (Llama 4) para reescribir la noticia con estilo humano, SEO y formato.
     """
     if not GROQ_API_KEY:
         print("   ⚠️ GROQ_API_KEY no configurada. Usando traducción simple.")
         return None
 
-    # ---- EXTRAER DATOS DEL ARTÍCULO ----
-    autor = articulo_completo.get('autor', 'No especificado') if articulo_completo else 'No especificado'
-    fecha_articulo = articulo_completo.get('fecha', 'No especificada') if articulo_completo else 'No especificada'
+    # Construir el mensaje del usuario
+    user_prompt = f"""Fuente: {fuente_nombre}
+Título original: {titulo}
+Descripción original: {descripcion[:2000]}
 
-    # ---- SINOPSIS DEL ARTÍCULO ----
-    sinopsis_ann = ""
-    if articulo_completo and 'contenido' in articulo_completo:
-        contenido = articulo_completo['contenido']
-        sinopsis_match = re.search(r'"([^"]{100,})"', contenido)
-        if sinopsis_match:
-            sinopsis_ann = sinopsis_match.group(1)
+Reescribí esta noticia siguiendo las reglas de estructura y estilo que se te indicaron. Desarrollá el contenido con todos los datos específicos y contexto.
 
-    # ---- MENSAJE PARA LA IA ----
-    user_prompt = f"""
-**DATOS PARA ESCRIBIR EL ARTÍCULO (USA ESTA INFORMACIÓN OBLIGATORIAMENTE):**
+{'' if not sinopsis_data else f'''
+**INFORMACIÓN ADICIONAL DEL ANIME RELACIONADO:**
+Título: {sinopsis_data['titulo']}
+Sinopsis: {sinopsis_data['sinopsis']}
+Géneros: {sinopsis_data['generos']}
+Puntaje en AniList: {sinopsis_data['puntaje']}/100
+URL: {sinopsis_data['url']}
 
-- **Fuente:** {fuente_nombre}
-- **Título original:** {titulo}
-- **Autor del artículo:** {autor}
-- **Fecha del artículo:** {fecha_articulo}
-- **Animes mencionados:** {', '.join(articulo_completo['animes_mencionados']) if articulo_completo and articulo_completo['animes_mencionados'] else 'Ninguno'}
-
-- **SINOPSIS (cópiala y tradúcela):**
-{sinopsis_ann if sinopsis_ann else 'No hay sinopsis en el artículo'}
-
-- **CONTENIDO COMPLETO DEL ARTÍCULO:**
-{articulo_completo['contenido'][:2000] if articulo_completo else descripcion}
-
-- **INFORMACIÓN DE ANILIST (si existe):**
-{json.dumps(sinopsis_data, indent=2) if sinopsis_data else 'No disponible'}
-
-**INSTRUCCIÓN LITERAL:**
-Escribe un artículo usando SOLO la información de este mensaje. Si la sinopsis está disponible, inclúyela COMPLETA. No omitas datos. No digas que falta información.
+**Importante:** Si la noticia habla de este anime, incluye su sinopsis y datos de manera natural en el desarrollo del artículo.
+'''}
 """
 
     try:
@@ -390,8 +259,8 @@ Escribe un artículo usando SOLO la información de este mensaje. Si la sinopsis
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": user_prompt}
                 ],
-                "temperature": 0.5,
-                "max_tokens": 1200
+                "temperature": 0.7,
+                "max_tokens": 1200  # Aumentado para permitir más detalle
             },
             timeout=60
         )
@@ -420,6 +289,7 @@ def convertir_markdown_a_html(texto_markdown):
     if not texto_markdown:
         return ""
 
+    # Configurar extensiones para mejor compatibilidad
     extensions = ['extra', 'codehilite', 'toc', 'nl2br']
 
     try:
@@ -427,6 +297,7 @@ def convertir_markdown_a_html(texto_markdown):
         return html
     except Exception as e:
         print(f"   ⚠️ Error convirtiendo Markdown: {e}")
+        # Fallback: reemplazar saltos de línea por <br>
         return texto_markdown.replace('\n', '<br>')
 
 # ============================================
@@ -500,9 +371,10 @@ def extraer_imagen(entry):
     return IMAGEN_DEFECTO
 
 # ============================================
-# FORMATO DEL POST CON MARKDOWN (ACTUALIZADO)
+# FORMATO DEL POST CON MARKDOWN
 # ============================================
 def formatear_contenido(texto_markdown, imagen, enlace, fuente):
+    # Convertir el markdown a HTML
     texto_html = convertir_markdown_a_html(texto_markdown)
 
     return f"""
@@ -510,7 +382,7 @@ def formatear_contenido(texto_markdown, imagen, enlace, fuente):
 <img src="{imagen}" alt="Anime" style="max-width:100%;border-radius:10px;"/>
 </div>
 <p><strong>📅 Fecha:</strong> {datetime.now().strftime('%d/%m/%Y')}</p>
-<p><strong>📰 Fuente Original:</strong> <a href="{enlace}" target="_blank" rel="noopener noreferrer">{fuente['categoria']}</a></p>
+<p><strong>📰 Fuente:</strong> <a href="{enlace}" target="_blank" rel="noopener noreferrer">{fuente['categoria']}</a></p>
 <hr style="border-color:#f43dce;border-width:1px;margin:20px 0;">
 <div style="font-size:1.1rem;line-height:1.8;">
 {texto_html}
@@ -518,11 +390,11 @@ def formatear_contenido(texto_markdown, imagen, enlace, fuente):
 <hr style="border-color:#f43dce;border-width:1px;margin:20px 0;">
 <p style="text-align:center;font-size:0.9rem;">
 <a href="{enlace}" target="_blank" rel="noopener noreferrer" style="color:#f43dce;text-decoration:none;font-weight:bold;">
-📌 Fuente
+🔗 Leer noticia completa →
 </a>
 </p>
 <p style="text-align:center;font-size:0.8rem;color:#9a9a9a;">
-Anime Actualidad Argentina - Te enteraste primero aquí
+Publicado automáticamente por Bot de Anime Actualidad Argentina
 </p>
 """
 
@@ -577,46 +449,29 @@ def main():
                         if sinopsis_data:
                             print(f"   ✅ Sinopsis obtenida para: {sinopsis_data['titulo']}")
 
-                    # ---- SCRAPEAR ARTÍCULO COMPLETO ----
-                    articulo_completo = None
-                    if 'animenewsnetwork' in nombre_fuente and hasattr(entry, 'link'):
-                        print(f"   🔍 Intentando scrapear artículo completo...")
-                        articulo_completo = scrapear_articulo_ann(entry.link)
-                        if articulo_completo:
-                            print(f"   ✅ Artículo scrapeado: {len(articulo_completo['contenido'])} caracteres")
-                            if articulo_completo['animes_mencionados'] and not sinopsis_data:
-                                for anime_candidato in articulo_completo['animes_mencionados']:
-                                    sinopsis_temp = buscar_sinopsis_anilist(anime_candidato)
-                                    if sinopsis_temp:
-                                        sinopsis_data = sinopsis_temp
-                                        print(f"   ✅ Sinopsis obtenida para: {sinopsis_data['titulo']}")
-                                        break
-
                     # ---- REESCRITURA CON GROQ ----
-                    texto_para_ia = articulo_completo['contenido'] if articulo_completo else descripcion[:2000]
-
                     texto_markdown = reescribir_con_groq(
                         entry.title,
-                        texto_para_ia[:3000],
+                        descripcion[:2000],
                         nombre_fuente,
-                        sinopsis_data,
-                        articulo_completo
+                        sinopsis_data
                     )
 
                     if texto_markdown:
+                        # Traducir título para el post
                         titulo_trad = traductor.traducir(entry.title)
                         titulo_trad = seo.optimizar_titulo(titulo_trad)
                     else:
+                        # Respaldo: traducción simple
                         print("   🔄 Usando traducción de respaldo")
                         titulo_trad = traductor.traducir(entry.title)
                         titulo_trad = seo.optimizar_titulo(titulo_trad)
                         texto_markdown = traductor.traducir(descripcion[:500]) if descripcion else "Noticia sin descripción."
+                        # Envolver en un párrafo simple
                         texto_markdown = f"**{entry.title}**\n\n{texto_markdown}"
 
                     # ---- EXTRAER IMAGEN ----
                     imagen = extraer_imagen(entry)
-                    if articulo_completo and articulo_completo.get('imagen'):
-                        imagen = articulo_completo['imagen']
 
                     # ---- FORMATO ----
                     contenido = formatear_contenido(texto_markdown, imagen, entry.link, config_fuente)
