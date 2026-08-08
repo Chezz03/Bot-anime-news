@@ -301,26 +301,31 @@ def scrapear_articulo_ann(url):
 # SYSTEM PROMPT - ESTRUCTURA PROFESIONAL (MEJORADO)
 # ============================================
 SYSTEM_PROMPT = """
-Eres un redactor experto para "Anime Actualidad Argentina", un blog argentino.
+Eres un redactor para "Anime Actualidad Argentina".
 
-**IMPORTANTE: Tu tarea es usar la información que se te proporciona en el mensaje del usuario.**
+**INSTRUCCIÓN PRINCIPAL:**
+Tu ÚNICA tarea es convertir los DATOS que se te proporcionan en un artículo periodístico.
+- NO puedes inventar información.
+- NO puedes decir que falta información si está en los datos.
+- NO puedes usar frases genéricas como "no se han proporcionado detalles".
 
-REGLAS OBLIGATORIAS:
+**ESTRUCTURA OBLIGATORIA:**
 
-1.  **Lee y usa TODOS los datos**: Si en el mensaje del usuario hay una sinopsis, un staff, fechas, o nombres de animes, DEBES incluirlos en tu redacción. **Está terminantemente prohibido decir "no se han proporcionado detalles" si la información está en los datos**. Eso es una señal de que no estás haciendo bien tu trabajo.
-2.  **Estructura Fija**: Organiza el artículo con los siguientes bloques (puedes usar emojis):
-    *   **📢 El anuncio**: Presenta la noticia principal con el dato más impactante (ej. "Teki Yatsuda anuncia el final de su manga Myther").
-    *   **🎬 Sinopsis**: Resume la trama de la serie usando la sinopsis que se te ha proporcionado.
-    *   **📖 Detalles de la publicación**: Incluye información sobre la editorial, fechas de lanzamiento de volúmenes, etc.
-    *   **📚 Contexto adicional**: Si hay información sobre otras obras del autor, menciónala.
-3.  **Tono Profesional y Cercano**: Escribe como un periodista especializado, pero con un tono cercano a los fans.
-4.  **Despedida**: Termina con "¿Qué opinás? Dejanos tu comentario en Anime Actualidad Argentina".
+1.  **📢 El anuncio**: Escribe un párrafo que incluya:
+    - El anuncio principal (ej. "Teki Yatsuda anuncia el final de su manga Myther").
+    - El autor del artículo y la fecha (si se proporcionan).
+2.  **🎬 Sinopsis**: Si se proporciona una sinopsis, COPIALA y TRADUCELA. No la resumas, no la parafrasees. Si no hay sinopsis, omite esta sección.
+3.  **📖 Detalles de la publicación**: Incluye TODOS los datos sobre editorial, fechas de lanzamiento, volúmenes, etc.
+4.  **📚 Contexto adicional**: Si se mencionan otras obras del autor, incluye esa información.
 
-**EJEMPLO DE CÓMO USAR LOS DATOS (SINÓPSIS)**:
-Si el mensaje del usuario contiene una sinopsis como: "It is the near future, and the night sky over Tokyo glitters with LED light..."
-Debes escribir: "La historia de Myther se sitúa en un futuro cercano, donde el cielo de Tokio brilla con luces LED...", y no debes decir "No hay detalles sobre la trama".
+**REGLAS DE ESTILO:**
+- Escribe en español, en un tono profesional pero cercano a los fans.
+- Usa Markdown para el formato.
+- Termina con "¿Qué opinás? Dejanos tu comentario en Anime Actualidad Argentina".
 
-**IMPORTANTE**: Proporcioná la salida en formato Markdown, siguiendo la estructura y usando la información proporcionada.
+**EJEMPLO DE USO DE DATOS:**
+Si los datos incluyen la sinopsis "It is the near future...", tu artículo debe escribir "La historia se sitúa en un futuro cercano...".
+Si los datos incluyen "Kodansha USA Publishing licensed the manga", tu artículo debe escribir "La editorial Kodansha USA ha licenciado el manga...".
 """
 
 # ============================================
@@ -328,37 +333,45 @@ Debes escribir: "La historia de Myther se sitúa en un futuro cercano, donde el 
 # ============================================
 def reescribir_con_groq(titulo, descripcion, fuente_nombre, sinopsis_data=None, articulo_completo=None):
     """
-    Usa Groq (Llama 4) para reescribir la noticia con estilo humano, SEO y formato.
+    Usa Groq para reescribir la noticia.
     """
     if not GROQ_API_KEY:
         print("   ⚠️ GROQ_API_KEY no configurada. Usando traducción simple.")
         return None
 
-    user_prompt = f"""Fuente: {fuente_nombre}
-Título original: {titulo}
+    # ---- EXTRAER DATOS DEL ARTÍCULO ----
+    autor = articulo_completo.get('autor', 'No especificado') if articulo_completo else 'No especificado'
+    fecha_articulo = articulo_completo.get('fecha', 'No especificada') if articulo_completo else 'No especificada'
 
-{'' if not articulo_completo else f'''
-**CONTENIDO COMPLETO DEL ARTÍCULO (extraído):**
-{articulo_completo['contenido'][:4000]}
+    # ---- SINOPSIS DEL ARTÍCULO ----
+    sinopsis_ann = ""
+    if articulo_completo and 'contenido' in articulo_completo:
+        contenido = articulo_completo['contenido']
+        sinopsis_match = re.search(r'"([^"]{100,})"', contenido)
+        if sinopsis_match:
+            sinopsis_ann = sinopsis_match.group(1)
 
-**DATOS ESTRUCTURADOS EXTRAÍDOS:**
-- Autor: {articulo_completo['autor']}
-- Fecha: {articulo_completo['fecha']}
-- Animes mencionados: {', '.join(articulo_completo['animes_mencionados']) if articulo_completo['animes_mencionados'] else 'No especificados'}
-- Staff roles: {json.dumps(articulo_completo['staff'], indent=2) if articulo_completo['staff'] else 'No especificados'}
-'''}
+    # ---- MENSAJE PARA LA IA ----
+    user_prompt = f"""
+**DATOS PARA ESCRIBIR EL ARTÍCULO (USA ESTA INFORMACIÓN OBLIGATORIAMENTE):**
 
-{'' if not sinopsis_data else f'''
-**INFORMACIÓN ADICIONAL DEL ANIME RELACIONADO:**
-Título: {sinopsis_data['titulo']}
-Sinopsis: {sinopsis_data['sinopsis']}
-Géneros: {sinopsis_data['generos']}
-Puntaje en AniList: {sinopsis_data['puntaje']}/100
-'''}
+- **Fuente:** {fuente_nombre}
+- **Título original:** {titulo}
+- **Autor del artículo:** {autor}
+- **Fecha del artículo:** {fecha_articulo}
+- **Animes mencionados:** {', '.join(articulo_completo['animes_mencionados']) if articulo_completo and articulo_completo['animes_mencionados'] else 'Ninguno'}
 
-**INSTRUCCIONES ESCRITURA:**
-Escribe un artículo periodístico usando TODOS los datos que se te proporcionan. No omitas información. No digas que falta información si está disponible.
-El artículo debe ser detallado, informativo y atractivo para los fans del anime y el manga.
+- **SINOPSIS (cópiala y tradúcela):**
+{sinopsis_ann if sinopsis_ann else 'No hay sinopsis en el artículo'}
+
+- **CONTENIDO COMPLETO DEL ARTÍCULO:**
+{articulo_completo['contenido'][:2000] if articulo_completo else descripcion}
+
+- **INFORMACIÓN DE ANILIST (si existe):**
+{json.dumps(sinopsis_data, indent=2) if sinopsis_data else 'No disponible'}
+
+**INSTRUCCIÓN LITERAL:**
+Escribe un artículo usando SOLO la información de este mensaje. Si la sinopsis está disponible, inclúyela COMPLETA. No omitas datos. No digas que falta información.
 """
 
     try:
@@ -374,7 +387,7 @@ El artículo debe ser detallado, informativo y atractivo para los fans del anime
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": user_prompt}
                 ],
-                "temperature": 0.7,
+                "temperature": 0.5,
                 "max_tokens": 1200
             },
             timeout=60
@@ -502,7 +515,7 @@ def formatear_contenido(texto_markdown, imagen, enlace, fuente):
 <hr style="border-color:#f43dce;border-width:1px;margin:20px 0;">
 <p style="text-align:center;font-size:0.9rem;">
 <a href="{enlace}" target="_blank" rel="noopener noreferrer" style="color:#f43dce;text-decoration:none;font-weight:bold;">
-📌 Fuente
+📌 Fuente: Anime Actualidad Argentina - Te enteraste primero aquí
 </a>
 </p>
 <p style="text-align:center;font-size:0.8rem;color:#9a9a9a;">
