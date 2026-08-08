@@ -298,36 +298,29 @@ def scrapear_articulo_ann(url):
         return None
 
 # ============================================
-# SYSTEM PROMPT - ESTRUCTURA PROFESIONAL
+# SYSTEM PROMPT - ESTRUCTURA PROFESIONAL (MEJORADO)
 # ============================================
 SYSTEM_PROMPT = """
 Eres un redactor experto para "Anime Actualidad Argentina", un blog argentino.
-Tu tarea es reescribir noticias de anime con un estilo profesional, detallado y atractivo.
 
-REGLAS DE ESTRUCTURA Y ESTILO (OBLIGATORIAS):
-1.  **Título**: El título debe ser llamativo, de máximo 60 caracteres, incluyendo el nombre del anime y la palabra clave principal.
-2.  **Estructura Fija (con Subtítulos Atractivos)**: Usá la siguiente estructura, pero con títulos creativos (ej. "📢 El anuncio", "🎬 El equipo", "📖 ¿De qué trata?", "📚 Un éxito en papel").
-    *   **Introducción**: Anuncio principal, con el dato más impactante.
-    *   **Staff de Producción**: Director, estudio, diseño de personajes, guionista, etc.
-    *   **Sinopsis Oficial**: Resumen de la trama, con detalles clave.
-    *   **Origen y Reconocimientos**: Información del manga, premios, nominaciones, etc.
-3.  **Precisión y Detalle**: Incluí TODOS los datos específicos: nombres de personas, estudios, fechas, números de tomos, premios, etc.
-4.  **Tono**: Profesional pero cercano, como un periodista especializado que le habla a un público apasionado. Usá emojis para darle dinamismo (📢, 🎬, 📖, 📚).
-5.  **Despedida**: Terminá con "¿Qué opinás? Dejanos tu comentario en Anime Actualidad Argentina".
+**IMPORTANTE: Tu tarea es usar la información que se te proporciona en el mensaje del usuario.**
 
-EJEMPLO DE TONO Y ESTRUCTURA:
-"📢 El nuevo anime de 'Giant Ojō-sama' ya tiene fecha de estreno: enero de 2027. La adaptación del manga de Nikumura Q, producida por Tatsunoko Production y dirigida por Hiroshi Ikehata, promete ser una de las comedias más esperadas de la temporada.
+REGLAS OBLIGATORIAS:
 
-### 🎬 El equipo detrás del proyecto
-La serie contará con Hiroshi Ikehata (WITCH WATCH) como director, con Katsuya Oshima como subdirector. Hajime Mitsuda (Food for the Soul) estará a cargo del diseño de personajes y la dirección de animación. La composición de la serie y el guion correrán a cargo de Yū Satō (Azur Lane: Slow Ahead!).
+1.  **Lee y usa TODOS los datos**: Si en el mensaje del usuario hay una sinopsis, un staff, fechas, o nombres de animes, DEBES incluirlos en tu redacción. **Está terminantemente prohibido decir "no se han proporcionado detalles" si la información está en los datos**. Eso es una señal de que no estás haciendo bien tu trabajo.
+2.  **Estructura Fija**: Organiza el artículo con los siguientes bloques (puedes usar emojis):
+    *   **📢 El anuncio**: Presenta la noticia principal con el dato más impactante (ej. "Teki Yatsuda anuncia el final de su manga Myther").
+    *   **🎬 Sinopsis**: Resume la trama de la serie usando la sinopsis que se te ha proporcionado.
+    *   **📖 Detalles de la publicación**: Incluye información sobre la editorial, fechas de lanzamiento de volúmenes, etc.
+    *   **📚 Contexto adicional**: Si hay información sobre otras obras del autor, menciónala.
+3.  **Tono Profesional y Cercano**: Escribe como un periodista especializado, pero con un tono cercano a los fans.
+4.  **Despedida**: Termina con "¿Qué opinás? Dejanos tu comentario en Anime Actualidad Argentina".
 
-### 📖 ¿De qué trata la historia?
-Oriko Fujidō, la heredera de una familia ultra-rica, comienza a crecer hasta alcanzar proporciones gigantescas. Cuando un invasor gigante ataca su pueblo, su mayordomo Sebastian le ofrece una bebida que la transforma en una gigante. Ahora, ella debe proteger su pueblo... aunque el riesgo de destruirlo es inminente.
+**EJEMPLO DE CÓMO USAR LOS DATOS (SINÓPSIS)**:
+Si el mensaje del usuario contiene una sinopsis como: "It is the near future, and the night sky over Tokyo glitters with LED light..."
+Debes escribir: "La historia de Myther se sitúa en un futuro cercano, donde el cielo de Tokio brilla con luces LED...", y no debes decir "No hay detalles sobre la trama".
 
-### 📚 Un éxito en papel
-El manga, serializado desde julio de 2020 en Sunday Webry, ya cuenta con 12 tomos recopilatorios. La obra fue nominada en los 'Next Manga Awards' y ocupó el 5º puesto en la encuesta de AnimeJapan sobre el anime más deseado."
-
-**IMPORTANTE**: Proporcioná la salida en formato Markdown, con la estructura y el tono indicados.
+**IMPORTANTE**: Proporcioná la salida en formato Markdown, siguiendo la estructura y usando la información proporcionada.
 """
 
 # ============================================
@@ -343,11 +336,10 @@ def reescribir_con_groq(titulo, descripcion, fuente_nombre, sinopsis_data=None, 
 
     user_prompt = f"""Fuente: {fuente_nombre}
 Título original: {titulo}
-Descripción original: {descripcion}
 
 {'' if not articulo_completo else f'''
 **CONTENIDO COMPLETO DEL ARTÍCULO (extraído):**
-{articulo_completo['contenido'][:3500]}
+{articulo_completo['contenido'][:4000]}
 
 **DATOS ESTRUCTURADOS EXTRAÍDOS:**
 - Autor: {articulo_completo['autor']}
@@ -364,14 +356,9 @@ Géneros: {sinopsis_data['generos']}
 Puntaje en AniList: {sinopsis_data['puntaje']}/100
 '''}
 
-Reescribí esta noticia usando TODOS los datos disponibles. 
-- Si hay una lista de animes o proyectos, menciónalos TODOS.
-- Si hay nombres de personal (staff), inclúyelos con sus roles.
-- Si hay cifras o fechas, inclúyelas con precisión.
-- El artículo debe ser informativo, detallado y respetuoso.
-- Nunca digas "no se han proporcionado detalles" o "falta de información".
-
-Seguí la estructura de ejemplo y el tono profesional.
+**INSTRUCCIONES ESCRITURA:**
+Escribe un artículo periodístico usando TODOS los datos que se te proporcionan. No omitas información. No digas que falta información si está disponible.
+El artículo debe ser detallado, informativo y atractivo para los fans del anime y el manga.
 """
 
     try:
