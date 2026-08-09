@@ -22,19 +22,116 @@ BLOGGER_REFRESH_TOKEN = os.environ.get("BLOGGER_REFRESH_TOKEN", "")
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 
-# Acepta "True", "true", "1" como verdadero
 MODO_PRUEBA = os.environ.get("MODO_PRUEBA", "False").strip().lower() in ("true", "1", "si", "sí")
 
 ARCHIVO_PROCESADOS = "procesados.json"
 MAX_PROCESADOS_GUARDADOS = 500
-MAX_NOTICIAS_POR_FEED = 10  # Aumentado para compensar el filtro
+MAX_NOTICIAS_POR_FEED = 4  # Reducido para no saturar la API
 
-# Fuente RSS de ANN (solo noticias)
-RSS_FEEDS = {
+# ============================================
+# FUENTES DE NOTICIAS (RSS + Web Scraping)
+# ============================================
+def extraer_noticias_crunchyroll():
+    """Extrae las noticias de la página de Crunchyroll News."""
+    url = "https://www.crunchyroll.com/es/news"
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=15)
+        if response.status_code != 200:
+            print(f"   ❌ Error al obtener Crunchyroll: {response.status_code}")
+            return []
+
+        soup = BeautifulSoup(response.text, 'html.parser')
+        noticias = []
+
+        # Buscar elementos de noticias
+        for article in soup.find_all(['article', 'div'], class_=re.compile(r'news|article|item')):
+            titulo_elem = article.find(['h2', 'h3', 'a'])
+            if titulo_elem:
+                titulo = titulo_elem.get_text(strip=True)
+                enlace = titulo_elem.get('href')
+                if enlace and not enlace.startswith('http'):
+                    enlace = "https://www.crunchyroll.com" + enlace
+                
+                desc_elem = article.find('p')
+                descripcion = desc_elem.get_text(strip=True) if desc_elem else ""
+                
+                noticias.append({
+                    'titulo': titulo,
+                    'enlace': enlace,
+                    'descripcion': descripcion,
+                    'fuente': 'Crunchyroll'
+                })
+        
+        print(f"   📥 Extraídas {len(noticias)} noticias de Crunchyroll")
+        return noticias[:MAX_NOTICIAS_POR_FEED]
+    except Exception as e:
+        print(f"   ❌ Error al extraer Crunchyroll: {e}")
+        return []
+
+def extraer_noticias_myanimelist():
+    """Extrae las noticias de la página de MyAnimeList News."""
+    url = "https://myanimelist.net/news"
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=15)
+        if response.status_code != 200:
+            print(f"   ❌ Error al obtener MyAnimeList: {response.status_code}")
+            return []
+
+        soup = BeautifulSoup(response.text, 'html.parser')
+        noticias = []
+
+        for item in soup.find_all('div', class_='news-unit'):
+            titulo_elem = item.find('a', class_='title')
+            if titulo_elem:
+                titulo = titulo_elem.get_text(strip=True)
+                enlace = titulo_elem.get('href')
+                if enlace and not enlace.startswith('http'):
+                    enlace = "https://myanimelist.net" + enlace
+                
+                desc_elem = item.find('div', class_='text')
+                descripcion = desc_elem.get_text(strip=True) if desc_elem else ""
+                
+                noticias.append({
+                    'titulo': titulo,
+                    'enlace': enlace,
+                    'descripcion': descripcion,
+                    'fuente': 'MyAnimeList'
+                })
+        
+        print(f"   📥 Extraídas {len(noticias)} noticias de MyAnimeList")
+        return noticias[:MAX_NOTICIAS_POR_FEED]
+    except Exception as e:
+        print(f"   ❌ Error al extraer MyAnimeList: {e}")
+        return []
+
+# ============================================
+# FUENTES CONFIGURADAS
+# ============================================
+FUENTES = {
     "animenewsnetwork": {
+        "tipo": "rss",
         "url": "https://www.animenewsnetwork.com/newsfeed/rss.xml",
         "categoria": "Noticias",
-        "etiquetas": ["Anime", "Internacional", "Noticias"]
+        "etiquetas": ["Anime", "Internacional", "Noticias"],
+        "filtrar_resenas": True
+    },
+    "myanimelist": {
+        "tipo": "web",
+        "funcion": extraer_noticias_myanimelist,
+        "categoria": "Noticias",
+        "etiquetas": ["Anime", "MyAnimeList"],
+        "filtrar_resenas": False
+    },
+    "crunchyroll": {
+        "tipo": "web",
+        "funcion": extraer_noticias_crunchyroll,
+        "categoria": "Noticias",
+        "etiquetas": ["Anime", "Estrenos", "Crunchyroll"],
+        "filtrar_resenas": False
     }
 }
 
@@ -51,7 +148,7 @@ def cargar_procesados():
             data = json.load(f)
             return set(data.get("links", []))
     except Exception as e:
-        print(f"⚠️ No se pudo leer {ARCHIVO_PROCESADOS}, se empieza de cero: {e}")
+        print(f"⚠️ No se pudo leer {ARCHIVO_PROCESADOS}: {e}")
         return set()
 
 def guardar_procesados(links_procesados):
@@ -63,7 +160,7 @@ def guardar_procesados(links_procesados):
         print(f"⚠️ No se pudo guardar {ARCHIVO_PROCESADOS}: {e}")
 
 # ============================================
-# AUTENTICACIÓN BLOGGER (OAuth con refresh token)
+# AUTENTICACIÓN BLOGGER
 # ============================================
 def autenticar_blogger():
     if not BLOGGER_REFRESH_TOKEN:
@@ -85,13 +182,13 @@ def autenticar_blogger():
     return build('blogger', 'v3', credentials=creds)
 
 # ============================================
-# EXTRACCIÓN DE CONTENIDO COMPLETO (MEJORADA)
+# EXTRACCIÓN DE CONTENIDO COMPLETO
 # ============================================
 def extraer_contenido_completo(url):
     """
     Entra a la página del artículo y extrae:
     - Texto completo del artículo
-    - Imagen destacada (priorizando og:image)
+    - Imagen destacada (og:image, twitter:image, o primera imagen grande)
     """
     try:
         headers = {
@@ -101,41 +198,35 @@ def extraer_contenido_completo(url):
         if response.status_code != 200:
             return None, None
 
-        soup = BeautifulSoup(response.text, 'html.parser')
+        soup = BeautifulSoup(response.text, 'lxml')
 
-        # ---- 1. EXTRAER IMAGEN DESTACADA ----
+        # ---- IMAGEN ----
         imagen = None
-        
-        # 1.1 Buscar en meta tags (og:image)
         og_image = soup.find('meta', property='og:image')
         if og_image and og_image.get('content'):
             imagen = og_image['content']
-            print(f"   🖼️  Imagen encontrada en og:image")
+            print(f"   🖼️ Imagen encontrada en og:image")
         else:
-            # 1.2 Buscar en meta tag twitter:image
             twitter_image = soup.find('meta', attrs={'name': 'twitter:image'})
             if twitter_image and twitter_image.get('content'):
                 imagen = twitter_image['content']
-                print(f"   🖼️  Imagen encontrada en twitter:image")
+                print(f"   🖼️ Imagen encontrada en twitter:image")
             else:
-                # 1.3 Buscar la primera imagen dentro del contenido del artículo
                 contenido = soup.find('div', class_='meat') or soup.find('div', id='content') or soup.find('article')
                 if contenido:
-                    # Buscar la primera imagen dentro del contenido
                     for img in contenido.find_all('img'):
                         src = img.get('src') or img.get('data-src')
                         if src and ('jpg' in src.lower() or 'png' in src.lower() or 'jpeg' in src.lower()):
                             if not src.startswith('http'):
                                 src = 'https:' + src if src.startswith('//') else src
-                            # Evitar iconos o imágenes muy pequeñas
                             width = img.get('width')
                             height = img.get('height')
                             if (width and int(width) > 100) or (height and int(height) > 100):
                                 imagen = src
-                                print(f"   🖼️  Imagen encontrada en el contenido")
+                                print(f"   🖼️ Imagen encontrada en el contenido")
                                 break
 
-        # ---- 2. EXTRAER TEXTO COMPLETO ----
+        # ---- TEXTO ----
         texto = None
         contenido = soup.find('div', class_='meat')
         if not contenido:
@@ -158,7 +249,7 @@ def extraer_contenido_completo(url):
         return None, None
 
 # ============================================
-# REESCRITURA CON IA (DeepSeek primero, Groq de respaldo)
+# REESCRITURA CON IA
 # ============================================
 class IARedactor:
     PROMPT_SISTEMA = (
@@ -259,7 +350,7 @@ class IARedactor:
             print("   🧠 Reescrito con Groq (respaldo)")
             return resultado
 
-        print("   ⚠️ IA no disponible, se usa el texto original sin traducir")
+        print("   ⚠️ IA no disponible, se usa el texto original")
         titulo_recortado = titulo[:62] + "..." if len(titulo) > 65 else titulo
         return titulo_recortado, descripcion
 
@@ -294,7 +385,7 @@ def formatear_contenido_borrador(texto_completo, imagen, enlace, fuente, titulo_
     return f"""
 <h1>{titulo_original}</h1>
 <p><strong>📅 Fecha:</strong> {datetime.now().strftime('%d/%m/%Y')}</p>
-<p><strong>📰 Fuente:</strong> <a href="{enlace}" target="_blank" rel="noopener noreferrer">{fuente['categoria']}</a></p>
+<p><strong>📰 Fuente:</strong> <a href="{enlace}" target="_blank" rel="noopener noreferrer">{fuente}</a></p>
 <hr style="border-color:#f43dce;border-width:1px;margin:20px 0;">
 <div style="font-size:1.1rem;line-height:1.8;">
 {texto_limpio.replace(chr(10), '<br>')}
@@ -311,6 +402,19 @@ def formatear_contenido_borrador(texto_completo, imagen, enlace, fuente, titulo_
 """
 
 # ============================================
+# CREAR BORRADOR EN BLOGGER
+# ============================================
+def crear_borrador_blogger(service, titulo, contenido, etiquetas):
+    """Crea un borrador en Blogger usando el servicio autenticado."""
+    post = {
+        'title': titulo,
+        'content': contenido,
+        'labels': etiquetas,
+        'status': 'DRAFT'
+    }
+    return service.posts().insert(blogId=BLOGGER_BLOG_ID, body=post).execute()
+
+# ============================================
 # FUNCIÓN PRINCIPAL
 # ============================================
 def main():
@@ -320,6 +424,8 @@ def main():
 
     if MODO_PRUEBA:
         print("🧪 MODO_PRUEBA activo")
+    else:
+        print("🔄 Modo producción: se crearán borradores reales")
 
     if not BLOGGER_BLOG_ID:
         print("❌ Error: BLOGGER_BLOG_ID no está configurado")
@@ -344,90 +450,107 @@ def main():
 
     total_nuevas = 0
 
-    for nombre_fuente, config_fuente in RSS_FEEDS.items():
+    for nombre_fuente, config_fuente in FUENTES.items():
         print(f"\n📰 Procesando: {nombre_fuente}")
-        try:
-            feed = feedparser.parse(config_fuente["url"])
-            print(f"   📡 {len(feed.entries)} noticias encontradas en el feed")
+        
+        entradas = []
+        if config_fuente["tipo"] == "rss":
+            try:
+                feed = feedparser.parse(config_fuente["url"])
+                entradas = feed.entries[:MAX_NOTICIAS_POR_FEED]
+                print(f"   📡 {len(entradas)} noticias encontradas en RSS")
+            except Exception as e:
+                print(f"   ❌ Error al parsear RSS: {e}")
+                continue
+        else:
+            entradas_raw = config_fuente["funcion"]()
+            entradas = [{
+                'title': e['titulo'],
+                'link': e['enlace'],
+                'description': e['descripcion'],
+                'fuente': e['fuente']
+            } for e in entradas_raw]
+            print(f"   📡 {len(entradas)} noticias encontradas en web")
 
-            for entry in feed.entries[:MAX_NOTICIAS_POR_FEED]:
-                enlace = entry.link
+        for entry in entradas:
+            enlace = entry.get('link', '')
+            if not enlace:
+                print(f"   ⚠️ Noticia sin enlace: {entry.get('title', 'Sin título')[:50]}...")
+                continue
 
-                if enlace in procesados:
-                    print(f"   ⏭️  Ya procesada: {entry.title[:50]}...")
-                    continue
+            if enlace in procesados:
+                print(f"   ⏭️ Ya procesada: {entry.get('title', 'Sin título')[:50]}...")
+                continue
 
-                # ---- FILTRO: SALTAR RESEÑAS Y FEATURES ----
+            # Filtrar reseñas solo para ANN
+            if config_fuente.get("filtrar_resenas", False):
                 etiquetas = entry.get('tags', [])
                 es_resena = any(tag.get('term', '').lower() in ['review', 'feature', 'interview', 'column'] for tag in etiquetas)
                 if es_resena:
-                    print(f"   ⏭️  Saltando reseña/feature: {entry.title[:50]}...")
+                    print(f"   ⏭️ Saltando reseña/feature: {entry.get('title', 'Sin título')[:50]}...")
                     continue
 
-                print(f"\n   📝 Procesando: {entry.title[:60]}...")
+            print(f"\n   📝 Procesando: {entry.get('title', 'Sin título')[:60]}...")
 
-                try:
-                    # ---- EXTRAER CONTENIDO COMPLETO ----
-                    texto_completo, imagen_completa = extraer_contenido_completo(enlace)
+            try:
+                # Extraer contenido completo
+                texto_completo, imagen_completa = extraer_contenido_completo(enlace)
 
-                    if texto_completo:
-                        print(f"   ✅ Texto completo extraído: {len(texto_completo)} caracteres")
-                        descripcion_para_ia = texto_completo[:800]
+                if texto_completo:
+                    descripcion_para_ia = texto_completo[:800]
+                    print(f"   ✅ Texto completo extraído: {len(texto_completo)} caracteres")
+                else:
+                    descripcion_original = entry.get('description', '')
+                    texto_completo = descripcion_original
+                    descripcion_para_ia = descripcion_original[:800]
+                    print(f"   ⚠️ Usando descripción del RSS ({len(texto_completo)} caracteres)")
+
+                # Reescritura con IA
+                titulo_original = entry.get('title', 'Sin título')
+                titulo_final, _ = ia.reescribir(titulo_original, descripcion_para_ia)
+
+                # Imagen
+                if imagen_completa:
+                    imagen = imagen_completa
+                    print(f"   ✅ Imagen extraída de la página")
+                else:
+                    imagen = extraer_imagen_desde_rss(entry)
+                    if imagen:
+                        print(f"   ℹ️ Imagen extraída del RSS")
                     else:
-                        print(f"   ⚠️ No se pudo extraer texto completo, usando summary del RSS")
-                        descripcion_original = entry.description if 'description' in entry else ""
-                        texto_completo = descripcion_original
-                        descripcion_para_ia = descripcion_original[:800]
+                        imagen = "https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEjHDh8uCDe6OcMJuYQ48ZoDxLDetLv4bCgAesT2hZZrbTlsSVM-vSy-OlGjDnV5W9AE1Y8dapE-ANqUfwyDO2qzqpZRdFQxcAGsOwnYUslcyDuVKI4_zvyi01pgwaQHVqauXTnccYtxd0XLCbq8asfwWCQeXWfrzCJ0xhPiNfSR7zqFbWzy28kxGA"
+                        print(f"   ℹ️ Usando imagen por defecto")
 
-                    # ---- REESCRIBIR TÍTULO ----
-                    titulo_final, _ = ia.reescribir(entry.title, descripcion_para_ia)
+                # Formatear contenido del borrador
+                fuente_nombre = entry.get('fuente', nombre_fuente)
+                contenido = formatear_contenido_borrador(
+                    texto_completo,
+                    imagen,
+                    enlace,
+                    fuente_nombre,
+                    titulo_final
+                )
 
-                    # ---- EXTRAER IMAGEN ----
-                    if imagen_completa:
-                        imagen = imagen_completa
-                        print(f"   ✅ Imagen extraída de la página")
-                    else:
-                        imagen = extraer_imagen_desde_rss(entry)
-                        if imagen:
-                            print(f"   ℹ️ Imagen extraída del RSS")
-                        else:
-                            imagen = "https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEjHDh8uCDe6OcMJuYQ48ZoDxLDetLv4bCgAesT2hZZrbTlsSVM-vSy-OlGjDnV5W9AE1Y8dapE-ANqUfwyDO2qzqpZRdFQxcAGsOwnYUslcyDuVKI4_zvyi01pgwaQHVqauXTnccYtxd0XLCbq8asfwWCQeXWfrzCJ0xhPiNfSR7zqFbWzy28kxGA"
-                            print(f"   ℹ️ Usando imagen por defecto")
-
-                    # ---- FORMATEAR CONTENIDO ----
-                    contenido = formatear_contenido_borrador(
-                        texto_completo,
-                        imagen,
-                        enlace,
-                        config_fuente,
-                        titulo_final
+                # Crear borrador
+                if MODO_PRUEBA:
+                    print(f"   🧪 [SIMULADO] Borrador: {titulo_final[:60]}")
+                else:
+                    resultado = crear_borrador_blogger(
+                        service,
+                        titulo_final,
+                        contenido,
+                        config_fuente['etiquetas']
                     )
+                    print(f"   ✅ Borrador creado: {titulo_final[:60]}")
 
-                    # ---- CREAR BORRADOR ----
-                    if MODO_PRUEBA:
-                        print(f"   🧪 [SIMULADO] Borrador: {titulo_final[:60]}")
-                    else:
-                        post = {
-                            'title': titulo_final,
-                            'content': contenido,
-                            'labels': config_fuente['etiquetas'],
-                            'status': 'DRAFT'
-                        }
-                        service.posts().insert(blogId=BLOGGER_BLOG_ID, body=post).execute()
-                        print(f"   ✅ Borrador creado: {titulo_final[:60]}")
+                procesados.add(enlace)
+                guardar_procesados(procesados)
+                total_nuevas += 1
 
-                    procesados.add(enlace)
-                    total_nuevas += 1
+                time.sleep(5)  # Pausa para no saturar la API
 
-                except Exception as e:
-                    print(f"   ❌ Error al procesar noticia: {e}")
-
-                time.sleep(2)
-
-        except Exception as e:
-            print(f"❌ Error procesando {nombre_fuente}: {e}")
-
-    guardar_procesados(procesados)
+            except Exception as e:
+                print(f"   ❌ Error al procesar noticia: {e}")
 
     print("\n" + "="*60)
     if MODO_PRUEBA:
